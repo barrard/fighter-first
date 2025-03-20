@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Multiplayer Platform Game</title>
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+                overflow: hidden;
+                background-color: #f0f0f0;
+                font-family: Arial, sans-serif;
+            }
+
+            #gameContainer {
+                position: relative;
+                width: 100vw;
+                height: 100vh;
+            }
+
+            #gameCanvas {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background-color: #87ceeb; /* Sky blue background */
+            }
+
+            #status {
+                position: absolute;
+                top: 10px;
+                left: 50%;
+                transform: translateX(-50%);
+                padding: 5px 15px;
+                border-radius: 5px;
+                background-color: rgba(0, 0, 0, 0.7);
+                color: white;
+                z-index: 10;
+            }
+
+            #controls {
+                position: absolute;
+                bottom: 10px;
+                left: 50%;
+                transform: translateX(-50%);
+                padding: 5px 15px;
+                border-radius: 5px;
+                background-color: rgba(0, 0, 0, 0.7);
+                color: white;
+                z-index: 10;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="gameContainer">
+            <canvas id="gameCanvas"></canvas>
+            <div id="status">Connecting to server...</div>
+            <div id="controls">Controls: Use ← and → arrow keys to move, ↑ to jump</div>
+        </div>
+
+        <script src="/socket.io/socket.io.js"></script>
+        <script>
+            // Debug connection
+            console.log("Script started, attempting to connect to Socket.IO");
+
+            // Connect to the server using Socket.io
+            const socket = io();
+
+            // Game elements
+            const canvas = document.getElementById("gameCanvas");
+            const ctx = canvas.getContext("2d");
+            const status = document.getElementById("status");
+
+            // Game constants
+            const PLAYER_WIDTH = 50;
+            const PLAYER_HEIGHT = 100;
+            const MOVEMENT_SPEED = 5; // Pixels per frame
+            const FLOOR_HEIGHT = 40;
+            let FLOOR_Y = canvas.height - FLOOR_HEIGHT;
+            const JUMP_VELOCITY = -15; // Negative because y-axis increases downward
+            const GRAVITY = 0.8;
+            let horizontalVelocity = 0;
+            const MAX_HORIZONTAL_VELOCITY = 8; // Maximum horizontal speed
+            const AIR_RESISTANCE = 0.02; // How quickly velocity decreases in air
+            const GROUND_FRICTION = 0.2; // How quickly velocity decreases on ground
+
+            // Set canvas to full screen
+            function resizeCanvas() {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                // Update floor position after resize
+                FLOOR_Y = canvas.height - FLOOR_HEIGHT;
+
+                // Debug
+                console.log(`Canvas resized: ${canvas.width}x${canvas.height}, Floor Y: ${FLOOR_Y}`);
+            }
+
+            // Initial resize and event listener
+            resizeCanvas();
+            window.addEventListener("resize", resizeCanvas);
+
+            // Game state
+            let playerId = null;
+            let players = new Map();
+            let keysPressed = {
+                ArrowLeft: false,
+                ArrowRight: false,
+                ArrowUp: false,
+            };
+
+            let verticalVelocity = 0;
+            let isJumping = false;
+
+            // Track movement input to send to server
+            let currentMovementInput = null;
+            let movementStartTime = null;
+
+            // Handle connection to the server
+            socket.on("connect", () => {
+                console.log("Connected to server with ID:", socket.id);
+                status.textContent = "Connected! Use arrow keys to move.";
+            });
+
+            // Handle disconnection
+            socket.on("disconnect", () => {
+                console.log("Disconnected from server");
+                status.textContent = "Disconnected from server. Trying to reconnect...";
+            });
+
+            // Initialize game state
+            socket.on("init", (data) => {
+                console.log("Received init data:", data);
+                playerId = data.playerId;
+
+                // Add all existing players
+                data.gameState.forEach((player) => {
+                    // Set initial y position on the floor
+                    player.y = FLOOR_Y - PLAYER_HEIGHT;
+                    players.set(player.id, player);
+                });
+
+                console.log("Players initialized:", players.size);
+
+                // Start game loop
+                requestAnimationFrame(gameLoop);
+            });
+
+            // Handle new player joining
+            socket.on("playerJoined", (player) => {
+                console.log("New player joined:", player.id);
+                // Set initial y position on the floor
+                player.y = FLOOR_Y - PLAYER_HEIGHT;
+                players.set(player.id, player);
+            });
+
+            // Handle player movement
+            socket.on("playerMoved", (data) => {
+                const player = players.get(data.id);
+                if (player) {
+                    player.x = data.x;
+                    player.height = data.height || 0;
+                    player.y = FLOOR_Y - PLAYER_HEIGHT - player.height;
+                }
+            });
+
+            // Handle player leaving
+            socket.on("playerLeft", (id) => {
+                console.log("Player left:", id);
+                players.delete(id);
+            });
+
+            // Handle keydown for movement
+            window.addEventListener("keydown", (e) => {
+                if (e.key in keysPressed) {
+                    keysPressed[e.key] = true;
+
+                    // Handle jump
+                    if (e.key === "ArrowUp" && !isJumping) {
+                        console.log("Jump key pressed");
+                        verticalVelocity = JUMP_VELOCITY;
+                        isJumping = true;
+                        // Initialize height to 0 (standing on floor)
+                        const player = players.get(playerId);
+                        if (player) {
+                            player.height = 0;
+                        }
+                        socket.emit("jump");
+                    }
+
+                    // If this is a new movement input
+                    if (
+                        (e.key === "ArrowLeft" || e.key === "ArrowRight") &&
+                        (!currentMovementInput || currentMovementInput !== e.key)
+                    ) {
+                        console.log("Movement key pressed:", e.key);
+                        currentMovementInput = e.key;
+                        movementStartTime = Date.now();
+                        // Send movement start to server
+                        socket.emit("moveStart", {
+                            direction: currentMovementInput,
+                            horizontalVelocity: horizontalVelocity,
+                        });
+                    }
+                }
+            });
+
+            // Handle keyup for movement
+            window.addEventListener("keyup", (e) => {
+                if (e.key in keysPressed) {
+                    keysPressed[e.key] = false;
+
+                    // If this is the current movement input
+                    if (currentMovementInput === e.key) {
+                        console.log("Movement key released:", e.key);
+                        const duration = Date.now() - movementStartTime;
+                        // Send movement end to server
+                        socket.emit("moveEnd", {
+                            direction: currentMovementInput,
+                            duration: duration,
+                            horizontalVelocity: horizontalVelocity,
+                        });
+
+                        currentMovementInput = null;
+                        movementStartTime = null;
+
+                        // Check if another key is still pressed
+                        if (keysPressed.ArrowLeft) {
+                            currentMovementInput = "ArrowLeft";
+                            movementStartTime = Date.now();
+                            socket.emit("moveStart", {
+                                direction: currentMovementInput,
+                                horizontalVelocity: horizontalVelocity,
+                            });
+                        } else if (keysPressed.ArrowRight) {
+                            currentMovementInput = "ArrowRight";
+                            movementStartTime = Date.now();
+                            socket.emit("moveStart", {
+                                direction: currentMovementInput,
+                                horizontalVelocity: horizontalVelocity,
+                            });
+                        }
+                    }
+                }
+            });
+
+            // Local movement prediction
+            function updateLocalPlayerPosition() {
+                if (!playerId) return;
+
+                const player = players.get(playerId);
+                if (!player) return;
+
+                // Check if player is on the ground or in the air
+                const onGround = !isJumping;
+
+                if (onGround) {
+                    // ON GROUND: Direct control with no momentum
+                    if (keysPressed.ArrowLeft) {
+                        horizontalVelocity = -MOVEMENT_SPEED;
+                    } else if (keysPressed.ArrowRight) {
+                        horizontalVelocity = MOVEMENT_SPEED;
+                    } else {
+                        // Stop immediately when on ground and no keys pressed
+                        horizontalVelocity = 0;
+                    }
+                } else {
+                    // IN AIR: Maintain momentum but allow slight control
+                    if (keysPressed.ArrowLeft) {
+                        // Cap maximum air speed but allow some control
+                        horizontalVelocity = Math.max(horizontalVelocity - 0.2, -MOVEMENT_SPEED);
+                    } else if (keysPressed.ArrowRight) {
+                        // Cap maximum air speed but allow some control
+                        horizontalVelocity = Math.min(horizontalVelocity + 0.2, MOVEMENT_SPEED);
+                    }
+                    // No else clause - if no keys pressed in air, maintain current velocity
+                }
+                // Apply horizontal velocity
+                player.x += horizontalVelocity;
+
+                // Constrain player within boundaries
+                player.x = Math.max(0, Math.min(canvas.width - PLAYER_WIDTH, player.x));
+
+                // Apply gravity and jumping physics
+                if (isJumping) {
+                    player.height -= verticalVelocity;
+                    verticalVelocity += GRAVITY;
+
+                    // Check if player has landed on the floor
+                    if (player.height <= 0) {
+                        player.height = 0;
+                        verticalVelocity = 0;
+                        isJumping = false;
+
+                        // Stop horizontal momentum on landing
+                        horizontalVelocity = 0;
+
+                        // If keys are still pressed, apply immediate ground movement
+                        if (keysPressed.ArrowLeft) {
+                            horizontalVelocity = -MOVEMENT_SPEED;
+                        } else if (keysPressed.ArrowRight) {
+                            horizontalVelocity = MOVEMENT_SPEED;
+                        }
+                    }
+                    player.y = FLOOR_Y - PLAYER_HEIGHT - player.height;
+                }
+            }
+
+            // Game loop for rendering
+            function gameLoop() {
+                // Clear canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // Update local player position for responsive feel
+                updateLocalPlayerPosition();
+
+                // Draw floor
+                ctx.fillStyle = "#8B4513"; // Brown floor
+                ctx.fillRect(0, FLOOR_Y, canvas.width, FLOOR_HEIGHT);
+
+                // Draw grass on top of floor
+                ctx.fillStyle = "#228B22"; // Forest green
+                ctx.fillRect(0, FLOOR_Y, canvas.width, 5);
+
+                // Draw all players
+                players.forEach((player) => {
+                    // Draw player rectangle
+                    ctx.fillStyle = player.color || "#FF0000"; // Default to red if no color
+                    ctx.fillRect(player.x, player.y, PLAYER_WIDTH, PLAYER_HEIGHT);
+
+                    // Highlight current player
+                    if (player.id === playerId) {
+                        ctx.strokeStyle = "black";
+                        ctx.lineWidth = 3;
+                        ctx.strokeRect(player.x, player.y, PLAYER_WIDTH, PLAYER_HEIGHT);
+
+                        // Add "YOU" label
+                        ctx.fillStyle = "black";
+                        ctx.font = "12px Arial";
+                        ctx.textAlign = "center";
+                        ctx.fillText("YOU", player.x + PLAYER_WIDTH / 2, player.y - 10);
+                    }
+                });
+
+                // Update player count
+                status.textContent = `Connected Players: ${players.size}`;
+
+                // Continue game loop
+                requestAnimationFrame(gameLoop);
+            }
+
+            // Draw initial floor even before connection
+            function drawInitialScene() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // Draw floor
+                ctx.fillStyle = "#8B4513"; // Brown floor
+                ctx.fillRect(0, FLOOR_Y, canvas.width, FLOOR_HEIGHT);
+
+                // Draw grass on top of floor
+                ctx.fillStyle = "#228B22"; // Forest green
+                ctx.fillRect(0, FLOOR_Y, canvas.width, 5);
+
+                // Draw loading text
+                ctx.fillStyle = "black";
+                ctx.font = "20px Arial";
+                ctx.textAlign = "center";
+                ctx.fillText("Connecting to server...", canvas.width / 2, canvas.height / 2);
+            }
+
+            // Draw initial scene
+            drawInitialScene();
+        </script>
+    </body>
+</html>
