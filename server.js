@@ -41,6 +41,9 @@ const gameState = {
 setInterval(() => {
     let updated = false;
 
+    // Update player facing directions based on opponents' positions
+    updatePlayerFacingDirections();
+
     // Update all players
     gameState.players.forEach((player) => {
         let positionChanged = false;
@@ -64,19 +67,12 @@ setInterval(() => {
                 player.horizontalVelocity = 0;
             }
         } else {
-            // IN AIR: Maintain momentum but allow slight control
-            if (player.isMoving) {
-                if (player.movingDirection === "ArrowLeft") {
-                    // Cap maximum air speed but allow some control
-                    player.horizontalVelocity = Math.max(player.horizontalVelocity - 0.2, -MOVEMENT_SPEED);
-                    positionChanged = true;
-                } else if (player.movingDirection === "ArrowRight") {
-                    // Cap maximum air speed but allow some control
-                    player.horizontalVelocity = Math.min(player.horizontalVelocity + 0.2, MOVEMENT_SPEED);
-                    positionChanged = true;
-                }
+            // IN AIR: Maintain momentum with no control
+            // Only mark position as changed if already moving horizontally
+            if (player.horizontalVelocity !== 0) {
+                positionChanged = true;
             }
-            // No else clause - if no movement in air, maintain current velocity
+            // No adjustments to velocity in the air - maintain momentum
         }
 
         // Apply horizontal movement
@@ -119,13 +115,13 @@ setInterval(() => {
 
     // Broadcast updated positions
     if (updated) {
-        const updatedPlayers = Array.from(gameState.players.values())
-            .filter((player) => player.isJumping || player.horizontalVelocity !== 0)
-            .map((player) => ({
-                id: player.id,
-                x: player.x,
-                height: player.height, // Only send height, not y
-            }));
+        // Always broadcast all players to ensure facing directions are updated
+        const updatedPlayers = Array.from(gameState.players.values()).map((player) => ({
+            id: player.id,
+            x: player.x,
+            height: player.height, // Only send height, not y
+            facing: player.facing, // Include facing direction
+        }));
 
         if (updatedPlayers.length > 0) {
             updatedPlayers.forEach((player) => {
@@ -134,6 +130,41 @@ setInterval(() => {
         }
     }
 }, 16); // ~60fps
+
+// Function to update player facing directions
+function updatePlayerFacingDirections() {
+    // Skip if there are fewer than 2 players
+    if (gameState.players.size < 2) return;
+
+    // Convert players to array for easier processing
+    const playerArray = Array.from(gameState.players.values());
+
+    // For each player, compare position with all other players and face the closest one
+    playerArray.forEach((player) => {
+        let closestDistance = Infinity;
+        let closestPlayer = null;
+
+        // Find the closest opponent
+        playerArray.forEach((opponent) => {
+            if (opponent.id !== player.id) {
+                const distance = Math.abs(opponent.x - player.x);
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                    closestPlayer = opponent;
+                }
+            }
+        });
+
+        // Update facing direction based on closest opponent
+        if (closestPlayer) {
+            if (closestPlayer.x > player.x) {
+                player.facing = "right";
+            } else {
+                player.facing = "left";
+            }
+        }
+    });
+}
 
 // Socket.io connection handling
 io.on("connection", (socket) => {
@@ -151,6 +182,7 @@ io.on("connection", (socket) => {
         horizontalVelocity: 0,
         isJumping: false,
         verticalVelocity: 0,
+        facing: "right", // Default facing direction
     };
 
     // Add player to game state
@@ -177,6 +209,18 @@ io.on("connection", (socket) => {
         if (data.horizontalVelocity !== undefined) {
             player.horizontalVelocity = data.horizontalVelocity;
         }
+    });
+
+    // Handle punch action
+    socket.on("punch", () => {
+        // Broadcast to all other clients that this player punched
+        socket.broadcast.emit("playerPunched", socket.id);
+    });
+
+    // Handle kick action
+    socket.on("kick", () => {
+        // Broadcast to all other clients that this player kicked
+        socket.broadcast.emit("playerKicked", socket.id);
     });
 
     // Handle jump event

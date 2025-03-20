@@ -86,6 +86,16 @@
             const AIR_RESISTANCE = 0.02; // How quickly velocity decreases in air
             const GROUND_FRICTION = 0.2; // How quickly velocity decreases on ground
 
+            // Add these new constants for fighting mechanics
+            const PUNCH_DURATION = 300; // milliseconds
+            const KICK_DURATION = 400; // milliseconds
+            const ARM_WIDTH = 30; // pixels
+            const ARM_HEIGHT = 10; // pixels
+            const ARM_Y_OFFSET = 30; // 70px from top of 100px character
+            const LEG_WIDTH = 35; // pixels
+            const LEG_HEIGHT = 8; // pixels
+            const LEG_Y_OFFSET = 70; // Position from top of character
+
             // Set canvas to full screen
             function resizeCanvas() {
                 canvas.width = window.innerWidth;
@@ -108,6 +118,8 @@
                 ArrowLeft: false,
                 ArrowRight: false,
                 ArrowUp: false,
+                p: false, // P for punch
+                k: false, // K for kick
             };
 
             let verticalVelocity = 0;
@@ -116,6 +128,12 @@
             // Track movement input to send to server
             let currentMovementInput = null;
             let movementStartTime = null;
+
+            // Add these fighting state variables
+            let isPunching = false;
+            let isKicking = false;
+            let punchStartTime = 0;
+            let kickStartTime = 0;
 
             // Handle connection to the server
             socket.on("connect", () => {
@@ -138,6 +156,8 @@
                 data.gameState.forEach((player) => {
                     // Set initial y position on the floor
                     player.y = FLOOR_Y - PLAYER_HEIGHT;
+                    // Set default facing direction if not provided
+                    player.facing = player.facing || "right";
                     players.set(player.id, player);
                 });
 
@@ -152,6 +172,8 @@
                 console.log("New player joined:", player.id);
                 // Set initial y position on the floor
                 player.y = FLOOR_Y - PLAYER_HEIGHT;
+                // Set default facing direction if not provided
+                player.facing = player.facing || "right";
                 players.set(player.id, player);
             });
 
@@ -162,6 +184,24 @@
                     player.x = data.x;
                     player.height = data.height || 0;
                     player.y = FLOOR_Y - PLAYER_HEIGHT - player.height;
+
+                    // Update facing direction if provided
+                    if (data.facing) {
+                        player.facing = data.facing;
+                    }
+                }
+            });
+
+            socket.on("playerKicked", (id) => {
+                const player = players.get(id);
+                if (player) {
+                    player.isKicking = true;
+                    player.kickStartTime = Date.now();
+
+                    // Reset kick after animation duration
+                    setTimeout(() => {
+                        player.isKicking = false;
+                    }, KICK_DURATION);
                 }
             });
 
@@ -187,6 +227,32 @@
                             player.height = 0;
                         }
                         socket.emit("jump");
+                    }
+                    debugger;
+                    // Handle punch
+                    if (e.code === "KeyP" && !isPunching && !isKicking) {
+                        console.log("Punch key pressed");
+                        isPunching = true;
+                        punchStartTime = Date.now();
+                        socket.emit("punch");
+
+                        // Reset punch after animation duration
+                        setTimeout(() => {
+                            isPunching = false;
+                        }, PUNCH_DURATION);
+                    }
+
+                    // Handle kick
+                    if (e.code === "KeyK" && !isKicking && !isPunching) {
+                        console.log("Kick key pressed");
+                        isKicking = true;
+                        kickStartTime = Date.now();
+                        socket.emit("kick");
+
+                        // Reset kick after animation duration
+                        setTimeout(() => {
+                            isKicking = false;
+                        }, KICK_DURATION);
                     }
 
                     // If this is a new movement input
@@ -266,15 +332,9 @@
                         horizontalVelocity = 0;
                     }
                 } else {
-                    // IN AIR: Maintain momentum but allow slight control
-                    if (keysPressed.ArrowLeft) {
-                        // Cap maximum air speed but allow some control
-                        horizontalVelocity = Math.max(horizontalVelocity - 0.2, -MOVEMENT_SPEED);
-                    } else if (keysPressed.ArrowRight) {
-                        // Cap maximum air speed but allow some control
-                        horizontalVelocity = Math.min(horizontalVelocity + 0.2, MOVEMENT_SPEED);
-                    }
-                    // No else clause - if no keys pressed in air, maintain current velocity
+                    // IN AIR: Maintain momentum with no control
+                    // No adjustments to velocity - horizontal momentum stays constant
+                    // until player lands
                 }
                 // Apply horizontal velocity
                 player.x += horizontalVelocity;
@@ -328,6 +388,111 @@
                     // Draw player rectangle
                     ctx.fillStyle = player.color || "#FF0000"; // Default to red if no color
                     ctx.fillRect(player.x, player.y, PLAYER_WIDTH, PLAYER_HEIGHT);
+
+                    // Draw punching animation (arm extension)
+                    if (player.isPunching || (player.id === playerId && isPunching)) {
+                        ctx.fillStyle = "#FF9999"; // Lighter color for the arm
+
+                        // Position arm based on facing direction
+                        if (player.facing === "right") {
+                            ctx.fillRect(
+                                player.x + PLAYER_WIDTH, // Start at right edge of player
+                                player.y + ARM_Y_OFFSET, // Position at 70px from top (30px from top of 100px character)
+                                ARM_WIDTH,
+                                ARM_HEIGHT
+                            );
+                        } else {
+                            ctx.fillRect(
+                                player.x - ARM_WIDTH, // Start at left edge and extend left
+                                player.y + ARM_Y_OFFSET,
+                                ARM_WIDTH,
+                                ARM_HEIGHT
+                            );
+                        }
+                    }
+
+                    // Draw kicking animation (leg extension)
+                    if (player.isKicking || (player.id === playerId && isKicking)) {
+                        ctx.fillStyle = "#FF9999"; // Lighter color for the leg
+
+                        // Position leg based on facing direction
+                        if (player.facing === "right") {
+                            ctx.fillRect(
+                                player.x + PLAYER_WIDTH, // Start at right edge of player
+                                player.y + LEG_Y_OFFSET, // Position at lower part of character
+                                LEG_WIDTH,
+                                LEG_HEIGHT
+                            );
+                        } else {
+                            ctx.fillRect(
+                                player.x - LEG_WIDTH, // Start at left edge and extend left
+                                player.y + LEG_Y_OFFSET,
+                                LEG_WIDTH,
+                                LEG_HEIGHT
+                            );
+                        }
+                    }
+
+                    // Draw direction indicator (triangle pointing in the facing direction)
+                    ctx.fillStyle = "black";
+                    const midY = player.y + PLAYER_HEIGHT / 2;
+
+                    if (player.facing === "right") {
+                        // Draw triangle pointing right
+                        ctx.beginPath();
+                        ctx.moveTo(player.x + PLAYER_WIDTH, midY);
+                        ctx.lineTo(player.x + PLAYER_WIDTH - 15, midY - 10);
+                        ctx.lineTo(player.x + PLAYER_WIDTH - 15, midY + 10);
+                        ctx.closePath();
+                        ctx.fill();
+                    } else {
+                        // facing left
+                        // Draw triangle pointing left
+                        ctx.beginPath();
+                        ctx.moveTo(player.x, midY);
+                        ctx.lineTo(player.x + 15, midY - 10);
+                        ctx.lineTo(player.x + 15, midY + 10);
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+
+                    // Draw eyes to indicate facing direction
+                    ctx.fillStyle = "white";
+                    if (player.facing === "right") {
+                        // Right-facing eyes
+                        ctx.beginPath();
+                        ctx.arc(player.x + PLAYER_WIDTH - 15, player.y + 30, 5, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.beginPath();
+                        ctx.arc(player.x + PLAYER_WIDTH - 30, player.y + 30, 5, 0, Math.PI * 2);
+                        ctx.fill();
+
+                        // Pupils
+                        ctx.fillStyle = "black";
+                        ctx.beginPath();
+                        ctx.arc(player.x + PLAYER_WIDTH - 13, player.y + 30, 2, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.beginPath();
+                        ctx.arc(player.x + PLAYER_WIDTH - 28, player.y + 30, 2, 0, Math.PI * 2);
+                        ctx.fill();
+                    } else {
+                        // Left-facing eyes
+                        ctx.beginPath();
+                        ctx.arc(player.x + 15, player.y + 30, 5, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.beginPath();
+                        ctx.arc(player.x + 30, player.y + 30, 5, 0, Math.PI * 2);
+                        ctx.fill();
+
+                        // Pupils
+                        ctx.fillStyle = "black";
+                        ctx.beginPath();
+                        ctx.arc(player.x + 13, player.y + 30, 2, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.beginPath();
+                        ctx.arc(player.x + 28, player.y + 30, 2, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
 
                     // Highlight current player
                     if (player.id === playerId) {
