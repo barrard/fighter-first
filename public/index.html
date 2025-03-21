@@ -61,12 +61,18 @@
         </div>
 
         <script src="/socket.io/socket.io.js"></script>
-        <script>
+        <!-- Main script using ES modules -->
+
+        <script type="module">
             // Debug connection
             console.log("Script started, attempting to connect to Socket.IO");
 
             // Connect to the server using Socket.io
             const socket = io();
+            import { LatencyMonitor } from "./js/LatencyMonitor.js";
+            // Make it available globally if needed
+            const latencyMonitor = new LatencyMonitor(socket);
+            latencyMonitor.getLatency();
 
             // Game elements
             const canvas = document.getElementById("gameCanvas");
@@ -228,7 +234,6 @@
                         }
                         socket.emit("jump");
                     }
-                    debugger;
                     // Handle punch
                     if (e.code === "KeyP" && !isPunching && !isKicking) {
                         console.log("Punch key pressed");

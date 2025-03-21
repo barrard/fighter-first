@@ -170,6 +170,14 @@ function updatePlayerFacingDirections() {
 io.on("connection", (socket) => {
     console.log("A user connected", socket.id);
 
+    socket.on("ping", (data) => {
+        // Echo back the client's timestamp
+        socket.emit("pong", {
+            clientTimestamp: data.clientTimestamp,
+            serverTimestamp: Date.now(),
+        });
+    });
+
     // Create a new player
     const playerId = socket.id;
     const player = {
