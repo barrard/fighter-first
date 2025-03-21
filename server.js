@@ -8,7 +8,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-const port = 3000;
+const port = 1548;
 
 // Serve static files from the public directory
 app.use(express.static("public"));
