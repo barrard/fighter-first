@@ -8,7 +8,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-const port = 1548;
+const port = process.env.NODE_ENV === "development" ? 3000 : 1548;
 
 // Serve static files from the public directory
 app.use(express.static("public"));
@@ -119,15 +119,15 @@ setInterval(() => {
         const updatedPlayers = Array.from(gameState.players.values()).map((player) => ({
             id: player.id,
             x: player.x,
-            height: player.height, // Only send height, not y
-            facing: player.facing, // Include facing direction
+            height: player.height,
+            facing: player.facing,
+            isJumping: player.isJumping,
+            verticalVelocity: player.verticalVelocity,
+            horizontalVelocity: player.horizontalVelocity, // Add this line
+            lastProcessedInput: player.lastProcessedInput || 0,
         }));
 
-        if (updatedPlayers.length > 0) {
-            updatedPlayers.forEach((player) => {
-                io.emit("playerMoved", player);
-            });
-        }
+        io.emit("gameState", { players: updatedPlayers });
     }
 }, 16); // ~60fps
 
@@ -205,56 +205,76 @@ io.on("connection", (socket) => {
     // Broadcast new player to all other players
     socket.broadcast.emit("playerJoined", player);
 
-    // Handle movement start
-    socket.on("moveStart", (data) => {
+    socket.on("playerInput", (inputState) => {
         const player = gameState.players.get(playerId);
-        if (player) {
-            player.isMoving = true;
-            player.movingDirection = data.direction;
-            console.log(`Player ${playerId} started moving ${data.direction}`);
-        }
-        // Optionally sync client-reported velocity
-        if (data.horizontalVelocity !== undefined) {
-            player.horizontalVelocity = data.horizontalVelocity;
-        }
-    });
+        if (!player) return;
 
-    // Handle punch action
-    socket.on("punch", () => {
-        // Broadcast to all other clients that this player punched
-        socket.broadcast.emit("playerPunched", socket.id);
-    });
+        // Check if player is on ground or in air
+        const onGround = !player.isJumping;
 
-    // Handle kick action
-    socket.on("kick", () => {
-        // Broadcast to all other clients that this player kicked
-        socket.broadcast.emit("playerKicked", socket.id);
-    });
-
-    // Handle jump event
-    socket.on("jump", () => {
-        const player = gameState.players.get(playerId);
-        if (player && !player.isJumping) {
-            player.isJumping = true;
-            player.verticalVelocity = JUMP_VELOCITY;
-            player.height = 0;
-
-            console.log(`Player ${playerId} jumped`);
-        }
-    });
-
-    // Handle movement end
-    socket.on("moveEnd", (data) => {
-        const player = gameState.players.get(playerId);
-        if (player) {
-            player.isMoving = false;
-            console.log(`Player ${playerId} stopped moving ${data.direction} after ${data.duration}ms`);
-
-            // Optionally sync client-reported velocity
-            if (data.horizontalVelocity !== undefined) {
-                player.horizontalVelocity = data.horizontalVelocity;
+        // Only apply horizontal movement changes if on ground
+        if (onGround) {
+            // ON GROUND: Direct control with no momentum
+            if (inputState.keysPressed.ArrowLeft) {
+                player.movingDirection = "ArrowLeft";
+                player.isMoving = true;
+                player.horizontalVelocity = -MOVEMENT_SPEED;
+            } else if (inputState.keysPressed.ArrowRight) {
+                player.movingDirection = "ArrowRight";
+                player.isMoving = true;
+                player.horizontalVelocity = MOVEMENT_SPEED;
+            } else {
+                player.isMoving = false;
+                player.horizontalVelocity = 0;
+            }
+        } else {
+            // IN AIR: Still update direction for rendering/facing but don't change velocity
+            if (inputState.keysPressed.ArrowLeft) {
+                player.movingDirection = "ArrowLeft";
+                player.isMoving = true;
+                // Do NOT update horizontalVelocity while in air
+            } else if (inputState.keysPressed.ArrowRight) {
+                player.movingDirection = "ArrowRight";
+                player.isMoving = true;
+                // Do NOT update horizontalVelocity while in air
+            } else {
+                player.isMoving = false;
+                // Do NOT update horizontalVelocity while in air
             }
         }
+
+        // Apply jump if needed (only if on ground)
+        if (inputState.keysPressed.ArrowUp && !player.isJumping) {
+            player.isJumping = true;
+            player.verticalVelocity = JUMP_VELOCITY;
+
+            // Set initial horizontal velocity at jump time based on current movement
+            // This ensures the player maintains this direction throughout the jump
+            if (inputState.keysPressed.ArrowLeft) {
+                player.horizontalVelocity = -MOVEMENT_SPEED;
+            } else if (inputState.keysPressed.ArrowRight) {
+                player.horizontalVelocity = MOVEMENT_SPEED;
+            }
+            // If neither left/right pressed, horizontalVelocity remains 0 for the jump
+        }
+
+        // Handle actions
+        if (inputState.isPunching) {
+            player.isPunching = true;
+            socket.broadcast.emit("playerPunched", socket.id);
+        } else {
+            player.isPunching = false;
+        }
+
+        if (inputState.isKicking) {
+            player.isKicking = true;
+            socket.broadcast.emit("playerKicked", socket.id);
+        } else {
+            player.isKicking = false;
+        }
+
+        // Store last processed input
+        player.lastProcessedInput = inputState.sequenceNumber;
     });
 
     // Handle player disconnection
