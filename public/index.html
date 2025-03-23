@@ -64,14 +64,18 @@
         <!-- Main script using ES modules -->
 
         <script type="module">
+            import LatencyMonitor from "./js/LatencyMonitor.js";
+            import InputBatchHandler from "./js/InputBatchHandler.js";
+
             // Debug connection
             console.log("Script started, attempting to connect to Socket.IO");
 
             // Connect to the server using Socket.io
             const socket = io();
-            import LatencyMonitor from "./js/LatencyMonitor.js";
             // Make it available globally if needed
-            const latencyMonitor = new LatencyMonitor(socket);
+            const latencyMonitor = new LatencyMonitor(socket, updateTimeOffset);
+            const inputBatcher = new InputBatchHandler(socket, 50); // 50ms batching interval
+
             latencyMonitor.getLatency();
 
             // Game elements
@@ -84,8 +88,17 @@
             let pendingInputs = [];
             let serverPosition = { x: 0, y: 0, height: 0 }; // Last known authoritative position
             let stateBuffer = new Map(); // Will store timestamped state updates for each player
+            // Add these variables at the top of your script
+            let serverTimeOffset = 0; // Difference between client and server time
+            let lastUpdateTime = 0; // Time of last server update
+            let predictedStates = []; // Array to store predicted states with timestamps
+            const inputCooldown = 100; // ms
+            let lastInputTime = 0;
+            let lastServerX = 0;
+            const PREDICTION_BUFFER_MS = 100; // Allow client to be 100ms ahead
 
             // Game constants
+            const INTERPOLATION_AMOUNT = 0.2; // Lower = smoother but less responsive
             const INTERPOLATION_DELAY = 100; // ms - buffer for smoother interpolation
             const PLAYER_WIDTH = 50;
             const PLAYER_HEIGHT = 100;
@@ -96,8 +109,8 @@
             const GRAVITY = 0.8;
             let horizontalVelocity = 0;
             const MAX_HORIZONTAL_VELOCITY = 8; // Maximum horizontal speed
-            const AIR_RESISTANCE = 0.02; // How quickly velocity decreases in air
-            const GROUND_FRICTION = 0.2; // How quickly velocity decreases on ground
+            const AIR_RESISTANCE = 0; // How quickly velocity decreases in air
+            const GROUND_FRICTION = 0; // How quickly velocity decreases on ground
 
             // Add these new constants for fighting mechanics
             const PUNCH_DURATION = 300; // milliseconds
@@ -108,6 +121,18 @@
             const LEG_WIDTH = 35; // pixels
             const LEG_HEIGHT = 8; // pixels
             const LEG_Y_OFFSET = 70; // Position from top of character
+
+            // Add this function to interpolate between positions
+            function lerp(start, end, t) {
+                return start * (1 - t) + end * t;
+            }
+
+            // Add this function to sync client and server time
+            function updateTimeOffset(serverTime) {
+                // Simple averaging to smooth out network jitter
+                const newOffset = Date.now() - serverTime;
+                serverTimeOffset = serverTimeOffset * 0.8 + newOffset * 0.2;
+            }
 
             // Set canvas to full screen
             function resizeCanvas() {
@@ -171,6 +196,9 @@
                     player.y = FLOOR_Y - PLAYER_HEIGHT;
                     // Set default facing direction if not provided
                     player.facing = player.facing || "right";
+                    // Initialize interpolation targets
+                    player.targetX = player.x;
+                    player.targetHeight = player.height || 0;
                     players.set(player.id, player);
                 });
 
@@ -187,6 +215,9 @@
                 player.y = FLOOR_Y - PLAYER_HEIGHT;
                 // Set default facing direction if not provided
                 player.facing = player.facing || "right";
+                // Initialize interpolation targets
+                player.targetX = player.x;
+                player.targetHeight = player.height || 0;
                 players.set(player.id, player);
             });
 
@@ -224,34 +255,45 @@
                 players.delete(id);
             });
 
-            // Modify your socket.on("playerMoved") handler
+            // Modify the gameState handler for other players
             socket.on("gameState", (data) => {
-                const serverTime = Date.now(); // When we received this update
+                const serverTime = Date.now();
 
                 data.players.forEach((serverPlayer) => {
                     if (serverPlayer.id === playerId) {
-                        // For local player, handle reconciliation
+                        // Local player - handle with prediction/reconciliation
                         handleServerUpdate(serverPlayer);
                     } else {
-                        // For other players, store state for interpolation
-                        if (!stateBuffer.has(serverPlayer.id)) {
-                            stateBuffer.set(serverPlayer.id, []);
-                        }
-                        // For other players, update directly
+                        // Other players - interpolate movement
                         let otherPlayer = players.get(serverPlayer.id);
-                        debugger;
-                        if (otherPlayer) {
-                            // Preserve important visual properties
+                        if (!otherPlayer) {
+                            console.log("Creating new remote player:", serverPlayer.id);
+                            otherPlayer = {
+                                id: serverPlayer.id,
+                                x: serverPlayer.x,
+                                y: FLOOR_Y - PLAYER_HEIGHT - (serverPlayer.height || 0),
+                                height: serverPlayer.height || 0,
+                                color: "#" + Math.floor(Math.random() * 16777215).toString(16),
+                                facing: serverPlayer.facing || "right",
+                                targetX: serverPlayer.x,
+                                targetHeight: serverPlayer.height || 0,
+                                isPunching: false,
+                                isKicking: false,
+                            };
+                            players.set(serverPlayer.id, otherPlayer);
+                        } else {
+                            // Existing player - update targets for interpolation
+                            otherPlayer.targetX = serverPlayer.x;
+                            otherPlayer.targetHeight = serverPlayer.height || 0;
+
+                            // Preserve visual state
                             const visualState = {
                                 color: otherPlayer.color,
                                 isPunching: otherPlayer.isPunching,
                                 isKicking: otherPlayer.isKicking,
                             };
 
-                            // Update position and other properties
-                            otherPlayer.x = serverPlayer.x;
-                            otherPlayer.height = serverPlayer.height || 0;
-                            otherPlayer.y = FLOOR_Y - PLAYER_HEIGHT - otherPlayer.height;
+                            // Update other properties that don't need interpolation
                             otherPlayer.facing = serverPlayer.facing;
 
                             // Restore visual state
@@ -260,6 +302,46 @@
                     }
                 });
             });
+
+            // Update your sendInputState function to include timestamp
+            function sendInputState() {
+                if (!playerId) return;
+                const player = players.get(playerId);
+                if (!player) return;
+
+                const currentTime = Date.now();
+
+                // Create input state with client-side timestamp
+                const inputState = {
+                    keysPressed: { ...keysPressed },
+                    isPunching: isPunching,
+                    isKicking: isKicking,
+                    isJumping: isJumping,
+                    horizontalVelocity: horizontalVelocity,
+                    verticalVelocity: verticalVelocity,
+                    x: player.x,
+                    y: player.y,
+                    height: player.height || 0,
+                    timestamp: currentTime - serverTimeOffset, // Convert to server time
+                };
+
+                // Add to batch handler and get sequence number
+                const sequenceNumber = inputBatcher.addInput(inputState);
+
+                // Store for reconciliation
+                const fullInputState = {
+                    ...inputState,
+                    sequenceNumber: sequenceNumber,
+                    clientTime: currentTime, // Keep track of client time too
+                };
+
+                pendingInputs.push(fullInputState);
+
+                // Limit stored inputs
+                if (pendingInputs.length > 30) {
+                    pendingInputs.shift();
+                }
+            }
 
             // Handle keydown for movement
             window.addEventListener("keydown", (e) => {
@@ -275,7 +357,10 @@
                         if (player) {
                             player.height = 0;
                         }
-                        // Note: We don't emit "jump" directly anymore - it'll be part of the input state
+
+                        // Send input state for jumping immediately
+                        sendInputState();
+                        inputBatcher.flushInputs(); // Ensure jump input is sent immediately
                     }
 
                     // Handle punch (keep local state updates)
@@ -283,9 +368,15 @@
                         console.log("Punch key pressed");
                         isPunching = true;
                         punchStartTime = Date.now();
+
+                        // Send punch input immediately
+                        sendInputState();
+                        inputBatcher.flushInputs(); // Ensure punch input is sent immediately
+
                         // Keep timeout to reset animation
                         setTimeout(() => {
                             isPunching = false;
+                            sendInputState(); // Send input state when punch ends
                         }, PUNCH_DURATION);
                     }
 
@@ -294,9 +385,15 @@
                         console.log("Kick key pressed");
                         isKicking = true;
                         kickStartTime = Date.now();
+
+                        // Send kick input immediately
+                        sendInputState();
+                        inputBatcher.flushInputs(); // Ensure kick input is sent immediately
+
                         // Keep timeout to reset animation
                         setTimeout(() => {
                             isKicking = false;
+                            sendInputState(); // Send input state when kick ends
                         }, KICK_DURATION);
                     }
 
@@ -310,102 +407,89 @@
                         movementStartTime = Date.now();
                     }
 
-                    sendInputState();
+                    // Only send input state for movement keys, not action keys which are handled above
+                    if (e.key !== "ArrowUp" && e.code !== "KeyP" && e.code !== "KeyK") {
+                        sendInputState();
+                    }
                 }
             });
 
-            // New function to send the complete input state
-            function sendInputState() {
-                if (!playerId) return;
-                const player = players.get(playerId);
-                if (!player) return;
+            // Before unloading the page, flush any remaining inputs
+            window.addEventListener("beforeunload", () => {
+                inputBatcher.flushInputs();
+            });
 
-                // Create input state
-                const inputState = {
-                    sequenceNumber: ++lastInputSequenceNumber,
-                    keysPressed: { ...keysPressed },
-                    isPunching: isPunching,
-                    isKicking: isKicking,
-                    isJumping: isJumping,
-                    horizontalVelocity: horizontalVelocity,
-                    verticalVelocity: verticalVelocity,
-                    x: player.x,
-                    y: player.y,
-                    height: player.height || 0,
-                    timestamp: Date.now(),
-                };
-
-                // Store for reconciliation
-                pendingInputs.push(inputState);
-                // Limit stored inputs to prevent memory issues
-                if (pendingInputs.length > 10) {
-                    pendingInputs.shift();
-                }
-
-                // Send to server
-                socket.emit("playerInput", inputState);
-            }
-
-            // Handle keyup for movement
+            // Update keyup event listener to be more aggressive about stopping
             window.addEventListener("keyup", (e) => {
                 if (e.key in keysPressed) {
                     keysPressed[e.key] = false;
 
-                    // If this is the current movement input
-                    if (currentMovementInput === e.key) {
-                        console.log("Movement key released:", e.key);
-                        const duration = Date.now() - movementStartTime;
+                    // For movement keys, force stop immediately
+                    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                        // Force stop movement if we released a movement key
+                        // and the other movement key isn't pressed
+                        if (!(keysPressed.ArrowLeft || keysPressed.ArrowRight)) {
+                            horizontalVelocity = 0;
 
-                        currentMovementInput = null;
-                        movementStartTime = null;
+                            // Force send the stop state
+                            sendInputState();
+                            inputBatcher.flushInputs();
+                        }
 
-                        // Check if another key is still pressed
-                        if (keysPressed.ArrowLeft) {
-                            currentMovementInput = "ArrowLeft";
-                            movementStartTime = Date.now();
-                        } else if (keysPressed.ArrowRight) {
-                            currentMovementInput = "ArrowRight";
-                            movementStartTime = Date.now();
+                        // Update movement tracking
+                        if (currentMovementInput === e.key) {
+                            currentMovementInput = null;
+
+                            // Check if another movement key is pressed
+                            if (keysPressed.ArrowLeft) currentMovementInput = "ArrowLeft";
+                            if (keysPressed.ArrowRight) currentMovementInput = "ArrowRight";
                         }
                     }
 
-                    // Send updated input state
+                    // Send updated input state for all keys
                     sendInputState();
                 }
-            }); // Local movement prediction
+            });
+
+            // Updated updateLocalPlayerPosition with smoother local prediction
             function updateLocalPlayerPosition() {
                 if (!playerId) return;
                 const player = players.get(playerId);
                 if (!player) return;
+                const currentTime = Date.now();
 
                 // Store the pre-update position (for reconciliation)
                 const previousX = player.x;
-                const previousY = player.y;
                 const previousHeight = player.height || 0;
 
                 // Check if player is on the ground or in the air
                 const onGround = !isJumping;
 
+                // Apply horizontal movement with time scaling
                 if (onGround) {
-                    // ON GROUND: Direct control with no momentum
+                    // Direct ground control
                     if (keysPressed.ArrowLeft) {
                         horizontalVelocity = -MOVEMENT_SPEED;
+                        lastInputTime = currentTime;
                     } else if (keysPressed.ArrowRight) {
                         horizontalVelocity = MOVEMENT_SPEED;
+                        lastInputTime = currentTime;
                     } else {
-                        // Stop immediately when on ground and no keys pressed
-                        horizontalVelocity = 0;
+                        // Force stop if no keys are pressed or if it's been too long since input
+                        if (currentTime - lastInputTime > inputCooldown) {
+                            horizontalVelocity = 0;
+                        }
                     }
+                } else {
+                    // Air movement - just air resistance
                 }
-                // No else clause - in air, maintain momentum
 
-                // Apply horizontal velocity
+                // Apply horizontal velocity with smoothing
                 player.x += horizontalVelocity;
-
                 // Constrain player within boundaries
                 player.x = Math.max(0, Math.min(canvas.width - PLAYER_WIDTH, player.x));
 
-                // Apply gravity and jumping physics
+                // Apply gravity and jumping physics with time scaling
                 if (isJumping) {
                     player.height -= verticalVelocity;
                     verticalVelocity += GRAVITY;
@@ -415,67 +499,85 @@
                         player.height = 0;
                         verticalVelocity = 0;
                         isJumping = false;
-
-                        // Stop horizontal momentum on landing
-                        horizontalVelocity = 0;
-
-                        // If keys are still pressed, apply immediate ground movement
-                        // if (keysPressed.ArrowLeft) {
-                        //     horizontalVelocity = -MOVEMENT_SPEED;
-                        // } else if (keysPressed.ArrowRight) {
-                        //     horizontalVelocity = MOVEMENT_SPEED;
-                        // }
                     }
                     player.y = FLOOR_Y - PLAYER_HEIGHT - player.height;
                 }
 
-                // Create and send input state if position changed
-                if (previousX !== player.x || previousY !== player.y || previousHeight !== player.height) {
+                // Only send input state if position changed significantly
+                if (Math.abs(previousX - player.x) > 0.5 || Math.abs(previousHeight - player.height) > 0.5) {
                     sendInputState();
                 }
             }
 
-            // Add a function to handle server reconciliation
-            // Improved handleServerUpdate function
+            // New function to apply a single input and update physics
+            function applyInput(player, input) {
+                // Check if player is on ground or in air
+                const onGround = !isJumping;
+
+                // Apply horizontal movement
+                if (onGround) {
+                    // Ground movement
+                    if (input.keysPressed.ArrowLeft) {
+                        horizontalVelocity = -MOVEMENT_SPEED;
+                    } else if (input.keysPressed.ArrowRight) {
+                        horizontalVelocity = MOVEMENT_SPEED;
+                    } else {
+                        horizontalVelocity = 0;
+                    }
+                } else {
+                    // In air - maintain momentum, no changes
+                }
+
+                // Apply position change
+                player.x += horizontalVelocity;
+
+                // Handle jump initiation
+                if (input.keysPressed.ArrowUp && !isJumping && onGround) {
+                    isJumping = true;
+                    verticalVelocity = JUMP_VELOCITY;
+                }
+
+                // Apply jumping physics
+                if (isJumping) {
+                    player.height -= verticalVelocity;
+                    verticalVelocity += GRAVITY;
+
+                    // Check landing
+                    if (player.height <= 0) {
+                        player.height = 0;
+                        verticalVelocity = 0;
+                        isJumping = false;
+                    }
+
+                    player.y = FLOOR_Y - PLAYER_HEIGHT - player.height;
+                }
+
+                // Keep player in bounds
+                player.x = Math.max(0, Math.min(canvas.width - PLAYER_WIDTH, player.x));
+            }
+
+            // Modify handleServerUpdate to better handle time differences
             function handleServerUpdate(serverPlayer) {
                 if (!playerId) return;
                 const player = players.get(playerId);
                 if (!player) return;
 
-                // Log server and client positions for debugging
-                console.log("Server position:", serverPlayer.x, serverPlayer.height);
-                console.log("Client position:", player.x, player.height);
+                // Record time of this update
+                const currentTime = Date.now();
 
-                // Store server position
-                serverPosition = {
-                    x: serverPlayer.x,
-                    y: serverPlayer.y !== undefined ? serverPlayer.y : FLOOR_Y - PLAYER_HEIGHT - serverPlayer.height,
-                    height: serverPlayer.height || 0,
-                };
+                // This is the server state time in client clock
+                const serverStateClientTime = currentTime - latencyMonitor.getLatency();
 
-                // Synchronize jump state from server
-                const serverIsJumping =
-                    serverPlayer.isJumping !== undefined ? serverPlayer.isJumping : serverPlayer.height > 0;
+                // Allow some prediction buffer - don't correct if we're just slightly ahead
+                const effectiveServerTime = serverStateClientTime + PREDICTION_BUFFER_MS;
 
-                // If server says we're not jumping but client thinks we are
-                if (!serverIsJumping && isJumping) {
-                    console.log("Server says we've landed - correcting jump state");
-                    isJumping = false;
-                    verticalVelocity = 0;
-                    player.height = 0;
-                    player.y = FLOOR_Y - PLAYER_HEIGHT;
+                // Skip too old updates (network hiccup)
+                if (lastUpdateTime > serverStateClientTime + 100) {
+                    console.log("Skipping outdated server update");
+                    return;
                 }
 
-                // If server says we're jumping but client thinks we're not
-                if (serverIsJumping && !isJumping) {
-                    console.log("Server says we're in the air - correcting jump state");
-                    isJumping = true;
-                    verticalVelocity = serverPlayer.verticalVelocity || JUMP_VELOCITY;
-                    // Also sync horizontal velocity if jumping state changed
-                    if (serverPlayer.horizontalVelocity !== undefined) {
-                        horizontalVelocity = serverPlayer.horizontalVelocity;
-                    }
-                }
+                lastUpdateTime = currentTime;
 
                 // Remove acknowledged inputs
                 if (serverPlayer.lastProcessedInput) {
@@ -484,66 +586,73 @@
                     );
                 }
 
-                // Check if positions differ significantly
-                const positionDifference = Math.abs(serverPosition.x - player.x);
-
-                // Always update facing direction from server
-                if (serverPlayer.facing) {
-                    player.facing = serverPlayer.facing;
-                }
-
-                // Always keep these properties intact
-                const preservedProperties = {
+                // Preserve visual state
+                const visualState = {
                     color: player.color,
                     id: player.id,
                     isPunching: player.isPunching,
                     isKicking: player.isKicking,
                 };
 
-                if (positionDifference > 5) {
-                    // Threshold for reconciliation
-                    console.log("Reconciling position, diff:", positionDifference);
+                // Calculate how much we've moved since server state
+                // Only apply server correction if really needed
+                const positionDiff = Math.abs(serverPlayer.x - player.x);
+                const jumpStateChanged =
+                    (serverPlayer.isJumping !== undefined ? serverPlayer.isJumping : serverPlayer.height > 0) !==
+                    isJumping;
 
-                    // Reset to server position but preserve client visual state
-                    player.x = serverPosition.x;
-                    player.y = serverPosition.y;
-                    player.height = serverPosition.height;
+                // If major differences, accept server state
+                if (positionDiff > 20 || jumpStateChanged) {
+                    // Apply server state
+                    player.x = serverPlayer.x;
+                    player.height = serverPlayer.height || 0;
+                    player.y = FLOOR_Y - PLAYER_HEIGHT - player.height;
+                    isJumping = serverPlayer.isJumping !== undefined ? serverPlayer.isJumping : serverPlayer.height > 0;
+                    horizontalVelocity = serverPlayer.horizontalVelocity || 0;
+                    verticalVelocity = serverPlayer.verticalVelocity || 0;
 
-                    // Sync physics state
-                    if (serverPlayer.horizontalVelocity !== undefined) {
-                        horizontalVelocity = serverPlayer.horizontalVelocity;
-                    }
-
-                    // Restore visual properties
-                    Object.assign(player, preservedProperties);
-
-                    // Reapply pending inputs - CRITICAL PART FIXED
+                    // Replay inputs that happened after server state
                     pendingInputs.forEach((input) => {
-                        if (isJumping) {
-                            // DON'T CHANGE HORIZONTAL VELOCITY WHILE JUMPING
-                            // Just apply the current horizontalVelocity
-                            player.x += horizontalVelocity;
-                        } else {
-                            // Only apply movement if on ground
-                            if (input.keysPressed.ArrowLeft) {
-                                player.x -= MOVEMENT_SPEED;
-                            } else if (input.keysPressed.ArrowRight) {
-                                player.x += MOVEMENT_SPEED;
-                            }
+                        if (input.clientTime >= effectiveServerTime) {
+                            applyInput(player, input);
                         }
-
-                        // Keep player within boundaries
-                        player.x = Math.max(0, Math.min(canvas.width - PLAYER_WIDTH, player.x));
                     });
                 }
+
+                // Always update facing direction
+                if (serverPlayer.facing) {
+                    player.facing = serverPlayer.facing;
+                }
+
+                // Restore visual state
+                Object.assign(player, visualState);
             }
             function gameLoop() {
+                // Debug current players
+                const localPlayer = players.get(playerId);
+                const remotePlayers = Array.from(players.values()).filter((p) => p.id !== playerId);
+                console.log(`Players in map - Local: ${localPlayer ? "yes" : "no"}, Remote: ${remotePlayers.length}`);
+                console.log("Remote player IDs:", remotePlayers.map((p) => p.id).join(", "));
+
                 // Clear canvas
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
 
                 // Update local player position for responsive feel
                 updateLocalPlayerPosition();
 
+                // Apply interpolation to other players ONLY ONCE
+                players.forEach((player) => {
+                    if (player.id !== playerId) {
+                        // Only interpolate remote players
+                        if (player.targetX !== undefined) {
+                            player.x = lerp(player.x, player.targetX, INTERPOLATION_AMOUNT);
+                        }
+                        if (player.targetHeight !== undefined) {
+                            player.height = lerp(player.height, player.targetHeight, INTERPOLATION_AMOUNT);
+                            player.y = FLOOR_Y - PLAYER_HEIGHT - player.height;
+                        }
+                    }
+                });
                 // Draw floor
                 ctx.fillStyle = "#8B4513"; // Brown floor
                 ctx.fillRect(0, FLOOR_Y, canvas.width, FLOOR_HEIGHT);
@@ -554,6 +663,10 @@
 
                 // Draw all players
                 players.forEach((player) => {
+                    // Skip local player
+                    // if (player.id === playerId) return;
+                    // Interpolate x position
+
                     // Draw player rectangle
                     ctx.fillStyle = player.color || "#FF0000"; // Default to red if no color
                     ctx.fillRect(player.x, player.y, PLAYER_WIDTH, PLAYER_HEIGHT);
