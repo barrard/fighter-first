@@ -1,17 +1,28 @@
 // Client-side latency monitor
 class LatencyMonitor {
-    constructor(socket, updateTimeOffset) {
+    constructor(socket) {
         this.socket = socket;
-        this.pingInterval = 1000; // Send ping every second
+        this.pingInterval = 500; // Send ping every second
         this.pingHistory = []; // Store recent ping measurements
         this.historySize = 10; // Number of measurements to keep
         this.currentLatency = 0;
         this.minLatency = Infinity;
         this.maxLatency = 0;
-        this.updateTimeOffset = updateTimeOffset;
 
+        //Tick data
+        this.currentTick = 0;
+        this.minTickTime = 25;
+        this.currentTime = new Date().getTime();
+
+        this.startAnimationTick();
         this.setupListeners();
         this.startHeartbeat();
+    }
+
+    startAnimationTick() {
+        setInterval(() => {
+            this.currentTick++;
+        }, this.minTickTime);
     }
 
     setupListeners() {
@@ -22,8 +33,6 @@ class LatencyMonitor {
 
             this.updateLatencyStats(latency);
             this.displayLatency();
-
-            this.updateTimeOffset(data.serverTimestamp);
         });
     }
 
@@ -80,6 +89,7 @@ class LatencyMonitor {
 		<div>Ping: <span style="color:${color}">${this.currentLatency}ms</span></div>
 		<div>Min: ${this.minLatency}ms</div>
 		<div>Max: ${this.maxLatency}ms</div>
+		<div>Tick: ${this.currentTick}</div>
 	  `;
     }
 

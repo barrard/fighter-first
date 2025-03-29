@@ -3,12 +3,19 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const path = require("path");
+var cors = require("cors");
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
 const port = process.env.NODE_ENV === "development" ? 3000 : 1548;
+
+var corsOptions = {
+    origin: "http://localhost:8080",
+    optionsSuccessStatus: 200, // some legacy browsers (IE11, various SmartTVs) choke on 204
+};
+app.use(cors(corsOptions));
 
 // Serve static files from the public directory
 app.use(express.static("public"));
@@ -57,10 +64,10 @@ setInterval(() => {
             if (player.isMoving) {
                 if (player.movingDirection === "ArrowLeft") {
                     player.horizontalVelocity = -MOVEMENT_SPEED;
-                    positionChanged = true;
+                    // positionChanged = true;
                 } else if (player.movingDirection === "ArrowRight") {
                     player.horizontalVelocity = MOVEMENT_SPEED;
-                    positionChanged = true;
+                    // positionChanged = true;
                 }
             } else {
                 // Stop immediately when on ground and no movement input
@@ -70,7 +77,7 @@ setInterval(() => {
             // IN AIR: Maintain momentum with no control
             // Only mark position as changed if already moving horizontally
             if (player.horizontalVelocity !== 0) {
-                positionChanged = true;
+                // positionChanged = true;
             }
             // No adjustments to velocity in the air - maintain momentum
         }
@@ -79,14 +86,14 @@ setInterval(() => {
         if (player.horizontalVelocity !== 0) {
             player.x += player.horizontalVelocity;
             player.x = Math.max(0, Math.min(5000 - PLAYER_WIDTH, player.x)); // Some large value as a safeguard
-            positionChanged = true;
+            // positionChanged = true;
         }
 
         // Handle jumping and gravity
         if (player.isJumping) {
             player.height -= player.verticalVelocity;
             player.verticalVelocity += GRAVITY;
-            positionChanged = true;
+            // positionChanged = true;
 
             // Check if player has landed
             if (player.height <= 0) {
@@ -108,28 +115,30 @@ setInterval(() => {
             }
         }
 
-        if (positionChanged) {
-            updated = true;
-        }
+        // if (positionChanged) {
+        //     updated = true;
+        // }
     });
 
     // Broadcast updated positions
-    if (updated) {
-        // Always broadcast all players to ensure facing directions are updated
-        const updatedPlayers = Array.from(gameState.players.values()).map((player) => ({
-            id: player.id,
-            x: player.x,
-            height: player.height,
-            facing: player.facing,
-            isJumping: player.isJumping,
-            verticalVelocity: player.verticalVelocity,
-            horizontalVelocity: player.horizontalVelocity, // Add this line
-            lastProcessedInput: player.lastProcessedInput || 0,
-        }));
+    // if (updated) {
+    // Always broadcast all players to ensure facing directions are updated
+    const updatedPlayers = Array.from(gameState.players.values()).map((player) => ({
+        id: player.id,
+        x: player.x,
+        height: player.height,
+        facing: player.facing,
+        isJumping: player.isJumping,
+        isKicking: player.isKicking,
+        isPunching: player.isPunching,
+        verticalVelocity: player.verticalVelocity,
+        horizontalVelocity: player.horizontalVelocity, // Add this line
+        lastProcessedInput: player.lastProcessedInput || 0,
+    }));
 
-        io.emit("gameState", { players: updatedPlayers });
-    }
-}, 16); // ~60fps
+    io.emit("gameState", { players: updatedPlayers });
+    // }
+}, 16.7); // ~20 fps
 
 // Function to update player facing directions
 function updatePlayerFacingDirections() {
@@ -191,6 +200,7 @@ io.on("connection", (socket) => {
         isJumping: false,
         verticalVelocity: 0,
         facing: "right", // Default facing direction
+        keysPressedHistory: [],
     };
 
     // Add player to game state
@@ -199,7 +209,7 @@ io.on("connection", (socket) => {
     // Send initial state to the new player
     socket.emit("init", {
         playerId: playerId,
-        gameState: Array.from(gameState.players.values()),
+        players: Array.from(gameState.players.values()),
     });
 
     // Broadcast new player to all other players
@@ -210,83 +220,69 @@ io.on("connection", (socket) => {
         const player = gameState.players.get(playerId);
         if (!player) return;
 
-        // Sort inputs by sequence number to ensure correct order
-        const sortedInputs = batchData.inputs.sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+        const { currentTick, keysPressed } = batchData;
 
-        // Process each input in the batch
-        let lastProcessedInput = 0;
+        // Check if player is on ground or in air
+        const onGround = !player.isJumping;
 
-        sortedInputs.forEach((inputState) => {
-            // Store highest sequence number for reconciliation
-            lastProcessedInput = Math.max(lastProcessedInput, inputState.sequenceNumber);
-
-            // Check if player is on ground or in air
-            const onGround = !player.isJumping;
-
-            // Only apply horizontal movement changes if on ground
-            if (onGround) {
-                // ON GROUND: Direct control with no momentum
-                if (inputState.keysPressed.ArrowLeft) {
-                    player.movingDirection = "ArrowLeft";
-                    player.isMoving = true;
-                    player.horizontalVelocity = -MOVEMENT_SPEED;
-                } else if (inputState.keysPressed.ArrowRight) {
-                    player.movingDirection = "ArrowRight";
-                    player.isMoving = true;
-                    player.horizontalVelocity = MOVEMENT_SPEED;
-                } else {
-                    player.isMoving = false;
-                    player.horizontalVelocity = 0;
-                }
+        const lastKeysPressed = player.keysPressedHistory[player.keysPressedHistory.length - 1];
+        const tickData = { ...keysPressed, tick: currentTick };
+        player.currentTick = currentTick;
+        player.keysPressedHistory.push(tickData);
+        if (player.keysPressedHistory.length > 10) {
+            player.keysPressedHistory.shift();
+        }
+        // Only apply horizontal movement changes if on ground
+        if (onGround) {
+            // ON GROUND: Direct control with no momentum
+            if (keysPressed.ArrowLeft) {
+                player.movingDirection = "ArrowLeft";
+                player.isMoving = true;
+                player.horizontalVelocity = -MOVEMENT_SPEED;
+            } else if (keysPressed.ArrowRight) {
+                player.movingDirection = "ArrowRight";
+                player.isMoving = true;
+                player.horizontalVelocity = MOVEMENT_SPEED;
             } else {
-                // IN AIR: Still update direction for rendering/facing but don't change velocity
-                if (inputState.keysPressed.ArrowLeft) {
-                    player.movingDirection = "ArrowLeft";
-                    player.isMoving = true;
-                    // Do NOT update horizontalVelocity while in air
-                } else if (inputState.keysPressed.ArrowRight) {
-                    player.movingDirection = "ArrowRight";
-                    player.isMoving = true;
-                    // Do NOT update horizontalVelocity while in air
-                } else {
-                    player.isMoving = false;
-                    // Do NOT update horizontalVelocity while in air
-                }
+                player.isMoving = false;
+                player.horizontalVelocity = 0;
             }
-
             // Apply jump if needed (only if on ground)
-            if (inputState.keysPressed.ArrowUp && !player.isJumping) {
+            if (keysPressed.ArrowUp && !player.isJumping) {
                 player.isJumping = true;
                 player.verticalVelocity = JUMP_VELOCITY;
-
-                // Set initial horizontal velocity at jump time based on current movement
-                if (inputState.keysPressed.ArrowLeft) {
-                    player.horizontalVelocity = -MOVEMENT_SPEED;
-                } else if (inputState.keysPressed.ArrowRight) {
-                    player.horizontalVelocity = MOVEMENT_SPEED;
-                }
             }
-
-            // Handle actions
-            if (inputState.isPunching) {
-                player.isPunching = true;
-                socket.broadcast.emit("playerPunched", socket.id);
+        } else {
+            // IN AIR: Still update direction for rendering/facing but don't change velocity
+            if (keysPressed.ArrowLeft) {
+                player.movingDirection = "ArrowLeft";
+                player.isMoving = true;
+                // Do NOT update horizontalVelocity while in air
+            } else if (keysPressed.ArrowRight) {
+                player.movingDirection = "ArrowRight";
+                player.isMoving = true;
+                // Do NOT update horizontalVelocity while in air
             } else {
-                player.isPunching = false;
+                player.isMoving = false;
+                // Do NOT update horizontalVelocity while in air
             }
-
-            if (inputState.isKicking) {
-                player.isKicking = true;
-                socket.broadcast.emit("playerKicked", socket.id);
-            } else {
-                player.isKicking = false;
-            }
-        });
-
-        // Update last processed input for reconciliation
-        if (lastProcessedInput > 0) {
-            player.lastProcessedInput = lastProcessedInput;
         }
+
+        // Handle actions
+        if (keysPressed.KeyP && !player.isPunching) {
+            player.isPunching = true;
+            // socket.broadcast.emit("playerPunched", socket.id);
+        } else {
+            player.isPunching = false;
+        }
+
+        if (keysPressed.KeyK && !player.isKicking) {
+            player.isKicking = true;
+            // socket.broadcast.emit("playerKicked", socket.id);
+        } else {
+            player.isKicking = false;
+        }
+        // });
     });
 
     // Handle player disconnection
