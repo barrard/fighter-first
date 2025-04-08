@@ -1,12 +1,4 @@
-import {
-    DrawPlayer,
-    DrawPunch,
-    DrawKick,
-    DrawFaceDirection,
-    DrawYou,
-    DrawFloor,
-    DrawInitialScene,
-} from "http://localhost:3000/js/Draw.js";
+import { DrawPlayer, DrawPunch, DrawKick, DrawFaceDirection, DrawYou, DrawFloor, DrawInitialScene } from "/js/Draw.js";
 import CONSTS from "http://localhost:3000/js/contants.js";
 export default class Canvas {
     constructor() {
@@ -32,7 +24,6 @@ export default class Canvas {
             FLOOR_HEIGHT,
             JUMP_VELOCITY,
             GRAVITY,
-            MAX_HORIZONTAL_VELOCITY,
             AIR_RESISTANCE,
             GROUND_FRICTION,
             PUNCH_DURATION,

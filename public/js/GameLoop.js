@@ -11,17 +11,28 @@ import {
 class GameLoop {
     constructor(myCanvas, socket, inputBatcher) {
         this.socket = socket;
-        this.inputBatcher = inputBatcher;
+        this.localInputs = inputBatcher;
         this.myCanvas = myCanvas;
         this.canvas = myCanvas.canvas;
         this.ctx = this.canvas.getContext("2d");
 
-        this.players = new Map();
+        this.allPlayers = new Map();
 
         this.isJumping = false;
         this.isKicking = false;
         this.isPunching = false;
         this.horizontalVelocity = 0;
+        this.frame = 0;
+        this.prevFrame = 0;
+        this.prevFrameSent = 0;
+        this.inputsOnDeck = [];
+        this.localX_Adjustment = 0;
+        this.totalXBeenAdjusted = 0;
+        setInterval(() => {
+            const diff = this.frame - this.prevFrame;
+            console.log({ prevFrame: this.prevFrame, frame: this.frame, diff });
+            this.prevFrame = this.frame;
+        }, 1000);
 
         const {
             PREDICTION_BUFFER_MS,
@@ -34,7 +45,6 @@ class GameLoop {
             // FLOOR_HEIGHT,
             JUMP_VELOCITY,
             GRAVITY,
-            MAX_HORIZONTAL_VELOCITY,
             AIR_RESISTANCE,
             GROUND_FRICTION,
             PUNCH_DURATION,
@@ -46,12 +56,13 @@ class GameLoop {
             LEG_HEIGHT,
             FLOOR_Y,
             LEG_Y_OFFSET,
+            SERVER_TICK_RATE,
         } = CONSTS(this.canvas);
 
         this.MOVEMENT_SPEED = MOVEMENT_SPEED;
         this.JUMP_VELOCITY = JUMP_VELOCITY;
         this.GRAVITY = GRAVITY;
-        this.MAX_HORIZONTAL_VELOCITY = MAX_HORIZONTAL_VELOCITY;
+        this.SERVER_TICK_RATE = SERVER_TICK_RATE;
         this.AIR_RESISTANCE = AIR_RESISTANCE;
         this.GROUND_FRICTION = GROUND_FRICTION;
         this.PUNCH_DURATION = PUNCH_DURATION;
@@ -69,43 +80,47 @@ class GameLoop {
     }
 
     init() {
+        this.localInputs.gameLoop = this;
         // Initialize game state
-        this.socket.on("init", (data) => {
-            console.log("Received init data:", data);
-            if (this.playerId != data.playerId) {
-                this.playerId = data.playerId;
+        this.socket.on("init", (serverData) => {
+            console.log("Received init serverData:", serverData);
+            if (this.localPlayerId != serverData.playerId) {
+                this.localPlayerId = serverData.playerId;
             }
 
+            this.localInputs.init();
+
             // Add all existing players
-            data.players.forEach((player) => {
+            serverData.players.forEach((serverPlayer) => {
                 // Set initial y position on the floor
-                player.y = this.FLOOR_Y - this.PLAYER_HEIGHT;
+                serverPlayer.y = this.FLOOR_Y - this.PLAYER_HEIGHT;
                 // Set default facing direction if not provided
-                player.facing = player.facing || "right";
+                serverPlayer.facing = serverPlayer.facing || "right";
                 // Initialize interpolation targets
-                player.targetX = player.x;
-                player.targetHeight = player.height || 0;
-                this.players.set(player.id, player);
+                serverPlayer.targetX = serverPlayer.x;
+                // serverPlayer.targetHeight = serverPlayer.height || 0;
+                this.allPlayers.set(serverPlayer.id, serverPlayer);
             });
 
-            console.log("this.Players initialized:", this.players.size);
+            console.log("this.Players initialized:", this.allPlayers.size);
+            this.gameLoop.bind(this)();
         });
 
         // Handle new player joining
-        this.socket.on("playerJoined", (player) => {
-            console.log("New player joined:", player.id);
+        this.socket.on("playerJoined", (serverPlayer) => {
+            console.log("New serverPlayer joined:", serverPlayer.id);
             // Set initial y position on the floor
-            player.y = this.FLOOR_Y - this.PLAYER_HEIGHT;
+            serverPlayer.y = this.FLOOR_Y - this.PLAYER_HEIGHT;
             // Set default facing direction if not provided
-            player.facing = player.facing || "right";
+            serverPlayer.facing = serverPlayer.facing || "right";
             // Initialize interpolation targets
-            player.targetX = player.x;
-            player.targetHeight = player.height || 0;
-            this.players.set(player.id, player);
+            serverPlayer.targetX = serverPlayer.x;
+            // serverPlayer.targetHeight = serverPlayer.height || 0;
+            this.allPlayers.set(serverPlayer.id, serverPlayer);
         });
 
         this.socket.on("playerKicked", (id) => {
-            const player = players.get(id);
+            const player = this.allPlayers.get(id);
             if (player) {
                 player.isKicking = true;
                 player.kickStartTime = Date.now();
@@ -120,20 +135,19 @@ class GameLoop {
         // Handle player leaving
         this.socket.on("playerLeft", (id) => {
             console.log("Player left:", id);
-            players.delete(id);
+            this.allPlayers.delete(id);
         });
 
         // Modify the gameState handler for other players
         this.socket.on("gameState", (data) => {
-            const serverTime = Date.now();
-
+            // const serverTime = Date.now();
             data.players.forEach((serverPlayer) => {
-                if (serverPlayer.id === this.playerId) {
+                if (serverPlayer.id === this.localPlayerId) {
                     // Local player - handle with prediction/reconciliation
-                    this.handleServerUpdate(serverPlayer);
+                    this.handleServerUpdateLocalPlayer(serverPlayer);
                 } else {
                     // Other players - interpolate movement
-                    let otherPlayer = this.players.get(serverPlayer.id);
+                    let otherPlayer = this.allPlayers.get(serverPlayer.id);
                     if (!otherPlayer) {
                         console.log("Creating new remote player:", serverPlayer.id);
                         otherPlayer = {
@@ -144,15 +158,15 @@ class GameLoop {
                             color: "#" + Math.floor(Math.random() * 16777215).toString(16),
                             facing: serverPlayer.facing || "right",
                             targetX: serverPlayer.x,
-                            targetHeight: serverPlayer.height || 0,
+                            // targetHeight: serverPlayer.height || 0,
                             isPunching: false,
                             isKicking: false,
                         };
-                        this.players.set(serverPlayer.id, otherPlayer);
+                        this.allPlayers.set(serverPlayer.id, otherPlayer);
                     } else {
                         // Existing player - update targets for interpolation
                         otherPlayer.targetX = serverPlayer.x;
-                        otherPlayer.targetHeight = serverPlayer.height || 0;
+                        // otherPlayer.targetHeight = serverPlayer.height || 0;
 
                         // Preserve visual state
                         const visualState = {
@@ -176,11 +190,10 @@ class GameLoop {
         // Handle connection to the server
         this.socket.on("connect", (s) => {
             console.log(s);
-            this.playerId = this.socket.id;
+            this.localPlayerId = this.socket.id;
 
             console.log("Connected to server with ID:", this.socket.id);
             this.myCanvas.status.textContent = "Connected! Use arrow keys to move.";
-            this.gameLoop.bind(this)();
         });
 
         // Handle disconnection
@@ -190,173 +203,341 @@ class GameLoop {
         });
     }
 
-    // Modify handleServerUpdate to better handle time differences
-    handleServerUpdate(serverPlayer) {
-        if (!this.playerId) return;
-        const player = this.players.get(this.playerId);
-        if (!player) return;
+    // Modify handleServerUpdateLocalPlayer to better handle time differences
+    handleServerUpdateLocalPlayer(serverPlayerLocal) {
+        if (!this.localPlayerId) return;
+        const localFuturePlayer = this.allPlayers.get(this.localPlayerId);
+        if (!localFuturePlayer) return;
+        const sentInputWithTicks = this.localInputs.sentInputWithTicks;
 
-        // Record time of this update
-        const currentTime = Date.now();
+        if (sentInputWithTicks.length > 0 && serverPlayerLocal.currentTick != this.localInputs.currentTick) {
+            // Preserve visual state
+            const visualState = {
+                color: localFuturePlayer.color,
+                id: localFuturePlayer.id,
+                isPunching: localFuturePlayer.isPunching,
+                isKicking: localFuturePlayer.isKicking,
+            };
+            const futureClientPosition = {
+                x: localFuturePlayer.x,
+                y: localFuturePlayer.y,
+                height: localFuturePlayer.height,
+                currentTick: localFuturePlayer.currentTick,
+            };
 
-        // This is the server state time in client clock
-        // const serverStateClientTime = currentTime - latencyMonitor.currentLatency;
+            console.log({
+                "FROM SERVER.currentTick": serverPlayerLocal.currentTick,
+                "serverPlayerLocal.x": serverPlayerLocal.x,
+                "serverPlayerLocal.y": serverPlayerLocal.y,
+                "serverPlayerLocal.height": serverPlayerLocal.height,
+            });
 
-        // Allow some prediction buffer - don't correct if we're just slightly ahead
-        // const effectiveServerTime = serverStateClientTime + PREDICTION_BUFFER_MS;
+            console.log({
+                "LOCALFUTUREPLAYER.currentTick": futureClientPosition.currentTick,
+                "futureClientPosition.x": futureClientPosition.x,
+                "futureClientPosition.y": futureClientPosition.y,
+                "futureClientPosition.height": futureClientPosition.height,
+            });
 
-        // Skip too old updates (network hiccup)
-        // if (lastUpdateTime > serverStateClientTime + 100) {
-        //     console.log("Skipping outdated server update");
-        //     return;
-        // }
-        debugger;
-        // lastUpdateTime = currentTime;
+            // Apply server state
+            localFuturePlayer.x = serverPlayerLocal.x;
+            localFuturePlayer.height = serverPlayerLocal.height || 0;
+            localFuturePlayer.y = this.FLOOR_Y - this.PLAYER_HEIGHT - localFuturePlayer.height;
+            // isJumping = serverPlayerLocal.isJumping !== undefined ? serverPlayerLocal.isJumping : serverPlayerLocal.height > 0;
+            localFuturePlayer.horizontalVelocity = serverPlayerLocal.horizontalVelocity || 0;
+            localFuturePlayer.verticalVelocity = serverPlayerLocal.verticalVelocity || 0;
+            localFuturePlayer.isJumping = serverPlayerLocal.isJumping || false;
+            // Always update facing direction
+            if (serverPlayerLocal.facing) {
+                localFuturePlayer.facing = serverPlayerLocal.facing;
+            }
 
-        // Remove acknowledged inputs
-        // if (serverPlayer.lastProcessedInput) {
-        //     pendingInputs = pendingInputs.filter((input) => input.sequenceNumber > serverPlayer.lastProcessedInput);
-        // }
+            // Find the input data with this tick
+            const matchingServerTickIndex = sentInputWithTicks.findIndex(
+                (data) => data.currentTick === serverPlayerLocal.currentTick + 1
+            );
 
-        // Preserve visual state
-        const visualState = {
-            color: player.color,
-            id: player.id,
-            isPunching: player.isPunching,
-            isKicking: player.isKicking,
-        };
+            if (matchingServerTickIndex >= 0) {
+                // We found the server tick in our sent inputs
 
-        // Calculate how much we've moved since server state
-        // Only apply server correction if really needed
-        const positionDiff = Math.abs(serverPlayer.x - player.x);
-        // const jumpStateChanged =
-        //     (serverPlayer.isJumping !== undefined ? serverPlayer.isJumping : serverPlayer.height > 0) !== isJumping;
+                // Remove all inputs up to and including the current server tick
+                // as they've been processed by the server
+                const inputsToReplay = sentInputWithTicks.slice(matchingServerTickIndex);
+                console.log(
+                    "inputsToReplay ",
+                    inputsToReplay.map((d) => d.currentTick)
+                );
+                // Remove processed inputs from our sent inputs array
+                this.localInputs.sentInputWithTicks = inputsToReplay;
 
-        // If major differences, accept server state
-        // if (positionDiff > 20 || jumpStateChanged) {
-        // Apply server state
-        player.x = serverPlayer.x;
-        player.height = serverPlayer.height || 0;
-        player.y = this.FLOOR_Y - this.PLAYER_HEIGHT - player.height;
-        // isJumping = serverPlayer.isJumping !== undefined ? serverPlayer.isJumping : serverPlayer.height > 0;
-        let horizontalVelocity = serverPlayer.horizontalVelocity || 0;
-        let verticalVelocity = serverPlayer.verticalVelocity || 0;
+                // Replay all inputs that haven't been processed by the server yet
+                let currentState = {
+                    x: localFuturePlayer.x,
+                    y: localFuturePlayer.y,
+                    height: localFuturePlayer.height,
+                    horizontalVelocity: localFuturePlayer.horizontalVelocity,
+                    verticalVelocity: localFuturePlayer.verticalVelocity,
+                    facing: localFuturePlayer.facing,
+                    isJumping: localFuturePlayer.isJumping || localFuturePlayer.height > 0,
+                };
 
-        // Replay inputs that happened after server state
-        // pendingInputs.forEach((input) => {
-        //     if (input.clientTime >= effectiveServerTime) {
-        //         applyInput(player, input);
-        //     }
-        // });
-        // }
+                const MS_PER_SERVER_TICK = 1000 / this.SERVER_TICK_RATE; // 50ms per tick
 
-        // Always update facing direction
-        if (serverPlayer.facing) {
-            player.facing = serverPlayer.facing;
+                // Replay each input with proper time scaling
+                for (const input of inputsToReplay) {
+                    for (let i = 0; i < input.keysPressed.length; i++) {
+                        // this is assuming always and forever
+                        // that the server tick rate is 50ms
+                        // and 3 ticks exist
+                        currentState = this.simulatePlayerMovementFrame(currentState, input.keysPressed[i]);
+                    }
+                }
+
+                console.log(
+                    "inputsOnDeck ",
+                    this.inputsOnDeck.map((d) => d)
+                );
+
+                for (let x = 0; x < this.inputsOnDeck.length; x++) {
+                    currentState = this.simulatePlayerMovementFrame(currentState, this.inputsOnDeck[x]);
+                }
+
+                // Update localFuturePlayer with predicted state
+                localFuturePlayer.x = currentState.x;
+                localFuturePlayer.y = currentState.y;
+                localFuturePlayer.height = currentState.height;
+                localFuturePlayer.facing = currentState.facing;
+                console.log({
+                    "localAfterReconciliation.currentTick": localFuturePlayer.currentTick,
+                    "localAfterReconciliation.x": localFuturePlayer.x,
+                    "localAfterReconciliation.y": localFuturePlayer.y,
+                    "localAfterReconciliation.height": localFuturePlayer.height,
+                });
+
+                this.localX_Adjustment = futureClientPosition.x - localFuturePlayer.x;
+                if (this.localX_Adjustment > 20) {
+                    debugger;
+                }
+                this.totalXBeenAdjusted = 0;
+                // Other state properties as needed
+                // Restore visual state
+                Object.assign(localFuturePlayer, visualState);
+            } else {
+                console.error(
+                    "~! matchingServerTickIndex < 0 for serverPlayerLocal.currentTick " + serverPlayerLocal.currentTick
+                );
+                // Server sent us a tick we don't have record of
+                // This could happen if there was significant packet loss
+                // In this case, just accept the server state and clear inputs
+                // this.localInputs.sentInputWithTicks = [];
+                // console.warn("Server tick not found in client history, resetting prediction");
+            }
+        }
+    }
+
+    // You'll need to implement this function to simulate one tick of player movement
+    simulatePlayerMovementFrame(playerState, keysPressed) {
+        // This should exactly match the movement logic on the server
+        const newState = { ...playerState };
+
+        // Handle jumping
+        if (keysPressed.ArrowUp && !playerState.isJumping) {
+            newState.verticalVelocity = this.JUMP_VELOCITY; // Replace with your jump velocity
+            newState.isJumping = true;
+        }
+        if (!keysPressed.ArrowRight) {
+            console.log("Why not ArrowRight?", keysPressed);
         }
 
-        // Restore visual state
-        Object.assign(player, visualState);
+        // Handle horizontal movement
+        if (keysPressed.ArrowLeft) {
+            newState.horizontalVelocity = -this.MOVEMENT_SPEED; // Replace with your movement speed
+            // newState.facing = "left";
+        } else if (keysPressed.ArrowRight) {
+            newState.horizontalVelocity = this.MOVEMENT_SPEED; // Replace with your movement speed
+            // newState.facing = "right";
+        } else if (!playerState.isJumping) {
+            // Add some deceleration if desired
+            newState.horizontalVelocity = 0; // Friction factor
+        }
+
+        // Update position with time-scaled movement
+        newState.x += newState.horizontalVelocity;
+        newState.height -= newState.verticalVelocity;
+
+        // Handle landing
+        if (newState.height <= 0) {
+            newState.height = 0;
+            newState.verticalVelocity = 0;
+            newState.isJumping = false;
+            // Apply gravity
+        } else if (newState.isJumping) {
+            newState.verticalVelocity += this.GRAVITY; // Replace with your gravity value
+        }
+
+        // Update y position based on height
+        newState.y = this.FLOOR_Y - this.PLAYER_HEIGHT - newState.height;
+        // ;
+        return newState;
     }
-    // Updated updateLocalPlayerPosition with smoother local prediction
-    updateLocalPlayerPosition() {
-        if (!this.playerId) return;
-        let player = this.players.get(this.playerId);
+    // Updated updateLocalPlayerGameLoop with smoother local prediction
+    updateLocalPlayerGameLoop() {
+        if (!this.localPlayerId) return;
+        let player = this.allPlayers.get(this.localPlayerId);
         if (!player) return;
-        const currentTime = Date.now();
 
         // Check if player is on the ground or in the air
         const onGround = !this.isJumping;
 
+        console.log({
+            "pcGL.currentTick Start": player.currentTick,
+            "pcGL.currentFrame Start": player.currentFrame,
+            x: player.x,
+            y: player.y,
+            height: player.height,
+            horizontalVelocity: player.horizontalVelocity,
+            verticalVelocity: player.verticalVelocity,
+            facing: player.facing,
+            isJumping: player.isJumping,
+        });
+        if (player.currentTick !== this.localInputs.currentTick) {
+            player.currentTick = this.localInputs.currentTick;
+        }
+        if (!this.localInputs.keysPressed.ArrowRight) {
+            console.log("Right should be held", this.localInputs);
+        }
+        this.inputsOnDeck.push({ ...this.localInputs.keysPressed, frame: this.frame });
         // Apply horizontal movement with time scaling
         if (onGround) {
             // Direct ground control
-            if (this.inputBatcher.keysPressed.ArrowLeft) {
+            if (this.localInputs.keysPressed.ArrowLeft) {
                 this.horizontalVelocity = -this.MOVEMENT_SPEED;
-            } else if (this.inputBatcher.keysPressed.ArrowRight) {
+            } else if (this.localInputs.keysPressed.ArrowRight) {
                 this.horizontalVelocity = this.MOVEMENT_SPEED;
-            } else {
+            } else if (!this.isJumping) {
                 // Force stop if no keys are pressed or if it's been too long since input
                 // if (currentTime - lastInputTime > inputCooldown) {
                 this.horizontalVelocity = 0;
                 // }
             }
-        } else {
-            // Air movement - just air resistance
+        }
+        if (this.localInputs.isJumping && !this.isJumping) {
+            player.verticalVelocity = this.JUMP_VELOCITY;
+            this.isJumping = true;
+            this.localInputs.isJumping = false;
         }
 
         // Apply horizontal velocity with smoothing
         player.x += this.horizontalVelocity;
-        // Constrain player within boundaries
+        // Constrain player within boundaries //NEEDS TODO BETTER
         player.x = Math.max(0, Math.min(this.canvas.width - this.PLAYER_WIDTH, player.x));
+        const adj = this.localX_Adjustment != 0 ? Math.floor(this.localX_Adjustment / 3) : this.localX_Adjustment;
+        this.totalXBeenAdjusted += adj;
+        if (Math.abs(this.totalXBeenAdjusted) < Math.abs(this.localX_Adjustment)) {
+            player.x += adj;
+        }
+
+        // console.log({
+        //     "Math.floor(this.localX_Adjustment / 3)": Math.floor(this.localX_Adjustment / 3),
+        //     playerX: player.x,
+        // });
 
         // Apply gravity and jumping physics with time scaling
         if (this.isJumping) {
-            player.height -= verticalVelocity;
-            verticalVelocity += GRAVITY;
+            player.height -= player.verticalVelocity;
+            player.verticalVelocity += this.GRAVITY;
 
             // Check if player has landed on the floor
             if (player.height <= 0) {
                 player.height = 0;
-                verticalVelocity = 0;
+                player.verticalVelocity = 0;
                 this.isJumping = false;
+                this.localInputs.isJumping = false;
             }
             player.y = this.FLOOR_Y - this.PLAYER_HEIGHT - player.height;
         }
+        console.log({
+            "pcGL.currentTick end": player.currentTick,
+            "pcGL.currentFrame end": player.currentFrame,
+
+            x: player.x,
+            y: player.y,
+            height: player.height,
+            horizontalVelocity: player.horizontalVelocity,
+            verticalVelocity: player.verticalVelocity,
+            facing: player.facing,
+            isJumping: player.isJumping,
+        });
     }
 
     gameLoop() {
         // Debug current players
-        const localPlayer = this.players.get(this.playerId);
-        const remotePlayers = Array.from(this.players.values()).filter((p) => p.id !== this.playerId);
+        // const localPlayer = this.allPlayers.get(this.localPlayerId);
+        // const remotePlayers = Array.from(this.allPlayers.values()).filter((p) => p.id !== this.localPlayerId);
 
+        console.log({ frame: this.frame });
+        this.frame++;
+        if (this.frame - this.prevFrameSent == 3) {
+            this.prevFrameSent = this.frame;
+            const p = this.allPlayers.get(this.localPlayerId);
+            console.log({
+                isMoving: p.isMoving,
+                ArrowRight: this.localInputs.keysPressed["ArrowRight"],
+                ArrowLeft: this.localInputs.keysPressed["ArrowLeft"],
+                ArrowUp: this.localInputs.keysPressed["ArrowUp"],
+            });
+            this.localInputs.sendBatch(); //.bind(this.localInputs);
+            this.localInputs.updateTick(); //.bind(this.localInputs);
+        }
         // Clear canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // Update local player position for responsive feel
-        this.updateLocalPlayerPosition();
-
         // Apply interpolation to other players ONLY ONCE
-        this.players.forEach((player) => {
-            if (player.id !== this.playerId) {
+        this.allPlayers.forEach((localPlayer) => {
+            // Skip local localPlayer
+            localPlayer.currentFrame = this.frame;
+            if (localPlayer.id !== this.localPlayerId) {
                 // Only interpolate remote players
-                if (player.targetX !== undefined) {
-                    player.x = player.targetX;
+                if (localPlayer.targetX !== undefined) {
+                    localPlayer.x = localPlayer.targetX;
                 }
-                if (player.targetHeight !== undefined) {
-                    player.height = player.targetHeight;
-                    player.y = this.FLOOR_Y - this.PLAYER_HEIGHT - player.height;
-                }
+                // if (localPlayer.targetHeight !== undefined) {
+                //     localPlayer.height = localPlayer.targetHeight;
+                //     localPlayer.y = this.FLOOR_Y - this.PLAYER_HEIGHT - localPlayer.height;
+                // }
             }
         });
+        // Update local player position for responsive feel
+        this.updateLocalPlayerGameLoop();
+
         // Draw floor
         DrawFloor(this.ctx, this.canvas);
 
         // Draw all players
-        this.players.forEach((player) => {
+        this.allPlayers.forEach((player) => {
             // Draw player rectangle
             DrawPlayer(this.ctx, player);
 
             // Draw punching animation (arm extension)
-            if (player.isPunching || (player.id === this.playerId && this.isPunching)) {
+            if (player.isPunching || (player.id === this.localPlayerId && this.isPunching)) {
                 DrawPunch(this.ctx, player);
             }
 
             // Draw kicking animation (leg extension)
-            if (player.isKicking || (player.id === this.playerId && this.isKicking)) {
+            if (player.isKicking || (player.id === this.localPlayerId && this.isKicking)) {
                 DrawKick(this.ctx, player);
             }
             // Draw direction indicator (triangle pointing in the facing direction)
             DrawFaceDirection(this.ctx, player);
 
             // Highlight current player
-            if (player.id === this.playerId) {
+            if (player.id === this.localPlayerId) {
                 DrawYou(this.ctx, player);
             }
         });
 
         // Update player count
-        this.myCanvas.status.textContent = `Connected Players: ${this.players.size}`;
+        this.myCanvas.status.textContent = `Connected Players: ${this.allPlayers.size}`;
 
         // Continue game loop
         requestAnimationFrame(this.gameLoop.bind(this));

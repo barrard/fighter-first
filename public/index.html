@@ -73,12 +73,14 @@
 
             // Debug connection
             console.log("Script started, attempting to connect to Socket.IO");
-
+            const ONE_SECOND = 1000;
+            const FPS_SERVER = 20;
+            const SERVER_FPS_TIME = ONE_SECOND / FPS_SERVER;
             // Connect to the server using Socket.io
             const socket = io("http://localhost:3000", { transports: ["websocket"] });
             // Make it available globally if needed
             const latencyMonitor = new LatencyMonitor(socket);
-            const inputBatcher = new InputBatchHandler(socket, 50); // 50ms batching interval
+            const inputBatcher = new InputBatchHandler(socket, SERVER_FPS_TIME); // 50ms batching interval
 
             const myCanvas = new Canvas(socket);
             const gameLoop = new GameLoop(myCanvas, socket, inputBatcher);
@@ -94,7 +96,6 @@
                 FLOOR_HEIGHT,
                 JUMP_VELOCITY,
                 GRAVITY,
-                MAX_HORIZONTAL_VELOCITY,
                 AIR_RESISTANCE,
                 GROUND_FRICTION,
                 PUNCH_DURATION,

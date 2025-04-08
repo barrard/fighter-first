@@ -26,6 +26,16 @@ app.get("/", (req, res) => {
 });
 
 // Game constants
+// Add these new constants for fighting mechanics
+const PUNCH_DURATION = 300; // milliseconds
+const KICK_DURATION = 400; // milliseconds
+const ARM_WIDTH = 30; // pixels
+const ARM_HEIGHT = 10; // pixels
+const ARM_Y_OFFSET = 30; // 70px from top of 100px character
+const LEG_WIDTH = 35; // pixels
+const LEG_HEIGHT = 8; // pixels
+const LEG_Y_OFFSET = 70; // Position from top of character
+
 const PLAYER_WIDTH = 50;
 const PLAYER_HEIGHT = 100;
 const MOVEMENT_SPEED = 5; // Pixels per frame
@@ -34,9 +44,15 @@ const JUMP_VELOCITY = -15;
 const GRAVITY = 0.8;
 const FLOOR_Y = 800; // This should match your client calculation
 const FLOOR_HEIGHT = 40; // or some other value
-const MAX_HORIZONTAL_VELOCITY = 8;
 const AIR_RESISTANCE = 0.02;
 const GROUND_FRICTION = 0.2;
+const ONE_SECOND = 1000;
+const FPS_SERVER = 20;
+const SERVER_FPS_TIME = ONE_SECOND / FPS_SERVER;
+let lastTimeSent = 0;
+let serverTick = 0;
+let dataSent = 0;
+let lastServerTick = 0;
 
 // Game state
 const gameState = {
@@ -44,19 +60,115 @@ const gameState = {
     timestamp: Date.now(),
 };
 
+function handlePlayerInput(player) {
+    const nextInput = player.batchInput.shift();
+    if (!nextInput) {
+        console.log(nextInput);
+        player.nextInput = player.lastInput;
+    } else {
+        player.nextInput = nextInput;
+        player.lastInput = nextInput;
+    }
+    if (!player.nextInput) return;
+
+    const { currentTick, keysPressed } = player.nextInput;
+
+    // Check if player is on ground or in air
+    const onGround = !player.isJumping;
+
+    // const lastKeysPressed = player.batchInput[player.batchInput.length - 1];
+    const tickData = { ...keysPressed, tick: currentTick };
+    if (!player.currentTick) {
+        player.currentTick = currentTick;
+    } else {
+        //tick should only be 1++
+        const tickDiff = currentTick - player.currentTick;
+        if (tickDiff > 1) {
+            console.log("do something");
+            player.currentTick = currentTick;
+        } else {
+            // console.log("aalss good");
+            player.currentTick = currentTick;
+        }
+    }
+
+    //SAVE
+    // player.batchInput.push(tickData);
+    // if (player.batchInput.length > 10) {
+    //     player.batchInput.shift();
+    // }
+
+    player.isMoving = false;
+
+    // Only apply horizontal movement changes if on ground
+    if (onGround) {
+        // ON GROUND: Direct control with no momentum
+        if (keysPressed.ArrowLeft) {
+            player.movingDirection = "ArrowLeft";
+            player.isMoving = true;
+            player.horizontalVelocity = -MOVEMENT_SPEED;
+        } else if (keysPressed.ArrowRight) {
+            player.movingDirection = "ArrowRight";
+            player.isMoving = true;
+            player.horizontalVelocity = MOVEMENT_SPEED;
+        } else {
+            player.isMoving = false;
+            player.horizontalVelocity = 0;
+            player.movingDirection = null;
+        }
+        // Apply jump if needed (only if on ground)
+        if (keysPressed.ArrowUp && !player.isJumping) {
+            player.isMoving = true;
+            player.isJumping = true;
+            player.verticalVelocity = JUMP_VELOCITY;
+        }
+    } else {
+        // IN AIR: Still update direction for rendering/facing but don't change velocity
+        player.isMoving = true;
+    }
+
+    // Handle actions
+    if (keysPressed.KeyP && !player.isPunching) {
+        player.isPunching = true;
+    } else {
+        player.isPunching = false;
+    }
+
+    if (keysPressed.KeyK && !player.isKicking) {
+        player.isKicking = true;
+    } else {
+        player.isKicking = false;
+    }
+}
+
+function addInputBatchToPlayer(batchInput, socket) {
+    const playerId = socket.id;
+    const player = gameState.players.get(playerId);
+    if (!player) return;
+    player.batchInput = [
+        ...player.batchInput,
+        ...batchInput.keysPressed.map((keysPressed) => ({ keysPressed, currentTick: batchInput.currentTick })),
+    ];
+    // console.log("player.batchInput.length", player.batchInput.length);
+}
+
 // Game loop for authoritative movement
 setInterval(() => {
-    let updated = false;
+    serverTick++;
+    // let updated = false;
 
     // Update player facing directions based on opponents' positions
     updatePlayerFacingDirections();
 
     // Update all players
     gameState.players.forEach((player) => {
-        let positionChanged = false;
+        handlePlayerInput(player);
+        // console.log(player.movingDirection);
+        player.serverTick = serverTick;
+        // let positionChanged = false;
 
         // Check if player is on the ground
-        const onGround = !player.isJumping;
+        const onGround = player.isJumping;
 
         // Apply movement based on input and current state
         if (onGround) {
@@ -69,17 +181,10 @@ setInterval(() => {
                     player.horizontalVelocity = MOVEMENT_SPEED;
                     // positionChanged = true;
                 }
-            } else {
+            } else if (!player.isJumping) {
                 // Stop immediately when on ground and no movement input
                 player.horizontalVelocity = 0;
             }
-        } else {
-            // IN AIR: Maintain momentum with no control
-            // Only mark position as changed if already moving horizontally
-            if (player.horizontalVelocity !== 0) {
-                // positionChanged = true;
-            }
-            // No adjustments to velocity in the air - maintain momentum
         }
 
         // Apply horizontal movement
@@ -105,13 +210,13 @@ setInterval(() => {
                 player.horizontalVelocity = 0;
 
                 // If still receiving movement input, apply ground movement
-                if (player.isMoving) {
-                    if (player.movingDirection === "ArrowLeft") {
-                        player.horizontalVelocity = -MOVEMENT_SPEED;
-                    } else if (player.movingDirection === "ArrowRight") {
-                        player.horizontalVelocity = MOVEMENT_SPEED;
-                    }
-                }
+                // if (player.isMoving) {
+                //     if (player.movingDirection === "ArrowLeft") {
+                //         player.horizontalVelocity = -MOVEMENT_SPEED;
+                //     } else if (player.movingDirection === "ArrowRight") {
+                //         player.horizontalVelocity = MOVEMENT_SPEED;
+                //     }
+                // }
             }
         }
 
@@ -121,24 +226,37 @@ setInterval(() => {
     });
 
     // Broadcast updated positions
-    // if (updated) {
-    // Always broadcast all players to ensure facing directions are updated
-    const updatedPlayers = Array.from(gameState.players.values()).map((player) => ({
-        id: player.id,
-        x: player.x,
-        height: player.height,
-        facing: player.facing,
-        isJumping: player.isJumping,
-        isKicking: player.isKicking,
-        isPunching: player.isPunching,
-        verticalVelocity: player.verticalVelocity,
-        horizontalVelocity: player.horizontalVelocity, // Add this line
-        lastProcessedInput: player.lastProcessedInput || 0,
-    }));
 
-    io.emit("gameState", { players: updatedPlayers });
+    const timeSent = Date.now();
+    // console.log("serverTick", serverTick);
+    // const timeDiff = timeSent - lastTimeSent;
+    const tickDiff = serverTick - lastServerTick;
+
+    if (tickDiff == 3) {
+        dataSent++;
+
+        lastServerTick = serverTick;
+        lastTimeSent = timeSent;
+        const players = Array.from(gameState.players.values()).map((player) => ({
+            id: player.id,
+            x: player.x,
+            currentTick: player.currentTick,
+            height: player.height,
+            facing: player.facing,
+            isJumping: player.isJumping,
+            isKicking: player.isKicking,
+            isPunching: player.isPunching,
+            verticalVelocity: player.verticalVelocity,
+            horizontalVelocity: player.horizontalVelocity, // Add this line
+            lastProcessedInput: player.lastProcessedInput || 0,
+            serverTick: player.serverTick,
+        }));
+        io.emit("gameState", { players });
+    }
     // }
-}, 16.7); // ~20 fps
+
+    // }
+}, 1000 / 60); // ~60 fps
 
 // Function to update player facing directions
 function updatePlayerFacingDirections() {
@@ -200,7 +318,10 @@ io.on("connection", (socket) => {
         isJumping: false,
         verticalVelocity: 0,
         facing: "right", // Default facing direction
-        keysPressedHistory: [],
+        batchInput: [],
+        serverTick: serverTick,
+        currentTick: 0,
+        currentFrame: 0,
     };
 
     // Add player to game state
@@ -215,75 +336,7 @@ io.on("connection", (socket) => {
     // Broadcast new player to all other players
     socket.broadcast.emit("playerJoined", player);
 
-    socket.on("playerInputBatch", (batchData) => {
-        const playerId = batchData.playerId || socket.id;
-        const player = gameState.players.get(playerId);
-        if (!player) return;
-
-        const { currentTick, keysPressed } = batchData;
-
-        // Check if player is on ground or in air
-        const onGround = !player.isJumping;
-
-        const lastKeysPressed = player.keysPressedHistory[player.keysPressedHistory.length - 1];
-        const tickData = { ...keysPressed, tick: currentTick };
-        player.currentTick = currentTick;
-        player.keysPressedHistory.push(tickData);
-        if (player.keysPressedHistory.length > 10) {
-            player.keysPressedHistory.shift();
-        }
-        // Only apply horizontal movement changes if on ground
-        if (onGround) {
-            // ON GROUND: Direct control with no momentum
-            if (keysPressed.ArrowLeft) {
-                player.movingDirection = "ArrowLeft";
-                player.isMoving = true;
-                player.horizontalVelocity = -MOVEMENT_SPEED;
-            } else if (keysPressed.ArrowRight) {
-                player.movingDirection = "ArrowRight";
-                player.isMoving = true;
-                player.horizontalVelocity = MOVEMENT_SPEED;
-            } else {
-                player.isMoving = false;
-                player.horizontalVelocity = 0;
-            }
-            // Apply jump if needed (only if on ground)
-            if (keysPressed.ArrowUp && !player.isJumping) {
-                player.isJumping = true;
-                player.verticalVelocity = JUMP_VELOCITY;
-            }
-        } else {
-            // IN AIR: Still update direction for rendering/facing but don't change velocity
-            if (keysPressed.ArrowLeft) {
-                player.movingDirection = "ArrowLeft";
-                player.isMoving = true;
-                // Do NOT update horizontalVelocity while in air
-            } else if (keysPressed.ArrowRight) {
-                player.movingDirection = "ArrowRight";
-                player.isMoving = true;
-                // Do NOT update horizontalVelocity while in air
-            } else {
-                player.isMoving = false;
-                // Do NOT update horizontalVelocity while in air
-            }
-        }
-
-        // Handle actions
-        if (keysPressed.KeyP && !player.isPunching) {
-            player.isPunching = true;
-            // socket.broadcast.emit("playerPunched", socket.id);
-        } else {
-            player.isPunching = false;
-        }
-
-        if (keysPressed.KeyK && !player.isKicking) {
-            player.isKicking = true;
-            // socket.broadcast.emit("playerKicked", socket.id);
-        } else {
-            player.isKicking = false;
-        }
-        // });
-    });
+    socket.on("playerInputBatch", (data) => addInputBatchToPlayer(data, socket));
 
     // Handle player disconnection
     socket.on("disconnect", () => {

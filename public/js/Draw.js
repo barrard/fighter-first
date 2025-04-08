@@ -1,4 +1,4 @@
-import CONSTS from "./contants.js";
+import CONSTS from "http://localhost:3000/js/contants.js";
 
 const {
     PREDICTION_BUFFER_MS,
@@ -11,7 +11,6 @@ const {
     FLOOR_HEIGHT,
     JUMP_VELOCITY,
     GRAVITY,
-    MAX_HORIZONTAL_VELOCITY,
     AIR_RESISTANCE,
     GROUND_FRICTION,
     PUNCH_DURATION,

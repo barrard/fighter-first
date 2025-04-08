@@ -7,8 +7,9 @@ export default class InputBatchHandler {
         this.isSending = false;
         this.lastSentTime = 0;
         this.currentTick = 0;
-        this.minTickTime = 25;
-        this.currentTime = new Date().getTime();
+        this.sentInputWithTicks = [];
+        // this.minTickTime = 25;
+        // this.currentTime = new Date().getTime();
 
         this.setDefaultInputState();
 
@@ -22,31 +23,23 @@ export default class InputBatchHandler {
         this.KICK_DURATION = 400;
         this.JUMP_VELOCITY = -10; // Example value
 
-        // Batched input state that will be sent to server
-        this.inputState = {
-            keysPressed: { ...this.keysPressed },
-            isJumping: false,
-            isPunching: false,
-            isKicking: false,
-            timestamp: Date.now(),
-        };
-
         // Flag to track if the state has changed since last send
         this.stateChanged = false;
+    }
 
-        // Set up the tick interval
-        this.tickTimer = setInterval(() => this.updateTick(), this.batchInterval);
-        // Set up the batch sending interval
-        this.batchTimer = setInterval(() => this.sendBatch(), this.batchInterval);
-
+    init() {
         // Bind event listeners
         this.setupEventListeners();
+        // Set up the tick interval
+        // this.tickTimer = setInterval(() => this.updateTick(), this.batchInterval);
+        // Set up the batch sending interval
+        // this.batchTimer = setInterval(() => this.sendBatch(), this.batchInterval);
     }
+
     updateTick() {
-        this.currentTime = new Date().getTime();
+        // this.currentTime = new Date().getTime();
         this.currentTick = this.currentTick + 1;
-        this.addKeysPressedToCurrentInputs();
-        this.sendBatch();
+        // this.addKeysPressedToCurrentInputs();
     }
 
     setDefaultInputState() {
@@ -58,29 +51,33 @@ export default class InputBatchHandler {
             KeyP: false,
             KeyK: false,
         };
-        this.currentInputs = {};
+        // this.currentInputs = {};
     }
 
-    addKeysPressedToCurrentInputs() {
-        this.currentInputs[this.currentTick] = { ...this.keysPressed };
-    }
+    // addKeysPressedToCurrentInputs() {
+    //     this.currentInputs[this.currentTick] = { ...this.keysPressed };
+    // }
 
     setupEventListeners() {
         // Handle keydown events
         window.addEventListener("keydown", (e) => {
             // Extract the key or code to use as identifier
-            const keyCode = e.code === "KeyP" || e.code === "KeyK" ? e.code : e.key;
+            const keyCode = e.code;
+            console.log("keydown", keyCode);
             // Only process if we're tracking this key
-            if (keyCode in this.keysPressed && !this.keysPressed[keyCode]) {
+            if (keyCode in this.keysPressed) {
                 this.keysPressed[keyCode] = true;
 
                 this.handleKeysPressed(keyCode);
+            } else {
+                console.log("ELSE WHAT???");
             }
         });
 
         // Handle keyup events
         window.addEventListener("keyup", (e) => {
             const keyCode = e.code;
+            console.log("keyup", keyCode);
 
             if (keyCode in this.keysPressed && this.keysPressed[keyCode]) {
                 this.keysPressed[keyCode] = false;
@@ -92,14 +89,17 @@ export default class InputBatchHandler {
     }
 
     handleKeysPressed(keyCode) {
-        if (keyCode === "ArrowLeft" || keyCode === "ArrowRight") {
-            // this.isMoving = true;
-            if (keyCode === "ArrowLeft") {
-                this.keysPressed.ArrowLeft = true;
-            } else if (keyCode === "ArrowRight") {
-                this.keysPressed.ArrowRight = true;
-            }
+        // if (keyCode === "ArrowLeft" || keyCode === "ArrowRight") {
+        // this.isMoving = true;
+        if (!this.keysPressed.ArrowRight) {
+            console.log("handle key press should alawyas be RIGHT");
         }
+        if (keyCode === "ArrowLeft") {
+            this.keysPressed.ArrowLeft = true;
+        } else if (keyCode === "ArrowRight") {
+            this.keysPressed.ArrowRight = true;
+        }
+        // }
         // Handle jump
         if (keyCode === "ArrowUp" && !this.isJumping) {
             console.log("Jump key pressed");
@@ -137,27 +137,21 @@ export default class InputBatchHandler {
 
     sendBatch() {
         // Only send if there's been a state change
-
-        // Send the current state to the server
-        this.socket.emit("playerInputBatch", {
-            keysPressed: { ...this.keysPressed },
+        const data = {
+            keysPressed: [...this.gameLoop.inputsOnDeck],
             currentTick: this.currentTick,
+        };
+        this.sentInputWithTicks.push(data);
+        if (this.sentInputWithTicks.length > 10) {
+            this.sentInputWithTicks.shift();
+        }
+        this.gameLoop.inputsOnDeck = [];
+        console.log(this.sentInputWithTicks.map((d) => d.currentTick));
+        console.log({
+            "sendBatch.currentTick": this.currentTick,
         });
-    }
-
-    // Force send the current input state immediately
-    flushInputs() {
-        this.sequenceNumber++;
-
-        this.socket.emit("playerInputBatch", {
-            inputState: this.inputState,
-            sequenceNumber: this.sequenceNumber,
-            batchId: Date.now(),
-            // playerId: this.socket.id,
-        });
-
-        this.lastSentTime = Date.now();
-        this.stateChanged = false;
+        // Send the current state to the server
+        this.socket.emit("playerInputBatch", data);
     }
 
     // Method to reset jump state (can be called by game physics)

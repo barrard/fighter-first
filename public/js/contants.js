@@ -11,7 +11,6 @@ export default (canvas) => {
         FLOOR_HEIGHT: 40,
         JUMP_VELOCITY: -15, // Negative because y-axis increases downward
         GRAVITY: 0.8,
-        MAX_HORIZONTAL_VELOCITY: 8, // Maximum horizontal speed
         AIR_RESISTANCE: 0, // How quickly velocity decreases in air
         GROUND_FRICTION: 0, // How quickly velocity decreases on ground
 
@@ -24,6 +23,9 @@ export default (canvas) => {
         LEG_WIDTH: 35, // pixels
         LEG_HEIGHT: 8, // pixels
         LEG_Y_OFFSET: 70, // Position from top of character
+
+        //SERVER SIDE
+        SERVER_TICK_RATE: 20,
     };
     if (canvas) {
         CONSTS.FLOOR_Y = canvas.height - CONSTS.FLOOR_HEIGHT;
