@@ -1,4 +1,5 @@
-import CONSTS from "http://localhost:3000/js/contants.js";
+import CONSTS from "/js/contants.js";
+// import CONSTS from "http://localhost:3000/js/contants.js";
 
 const {
     PREDICTION_BUFFER_MS,

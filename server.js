@@ -63,7 +63,7 @@ const gameState = {
 function handlePlayerInput(player) {
     const nextInput = player.batchInput.shift();
     if (!nextInput) {
-        console.log(nextInput);
+        console.log("nextInput shegone");
         player.nextInput = player.lastInput;
     } else {
         player.nextInput = nextInput;
@@ -77,7 +77,7 @@ function handlePlayerInput(player) {
     const onGround = !player.isJumping;
 
     // const lastKeysPressed = player.batchInput[player.batchInput.length - 1];
-    const tickData = { ...keysPressed, tick: currentTick };
+    // const tickData = { ...keysPressed, tick: currentTick };
     if (!player.currentTick) {
         player.currentTick = currentTick;
     } else {
@@ -98,33 +98,35 @@ function handlePlayerInput(player) {
     //     player.batchInput.shift();
     // }
 
-    player.isMoving = false;
+    // player.isMoving = false;
 
     // Only apply horizontal movement changes if on ground
     if (onGround) {
         // ON GROUND: Direct control with no momentum
         if (keysPressed.ArrowLeft) {
             player.movingDirection = "ArrowLeft";
-            player.isMoving = true;
-            player.horizontalVelocity = -MOVEMENT_SPEED;
+            // player.isMoving = true;
+            // player.horizontalVelocity = -MOVEMENT_SPEED;
         } else if (keysPressed.ArrowRight) {
             player.movingDirection = "ArrowRight";
-            player.isMoving = true;
-            player.horizontalVelocity = MOVEMENT_SPEED;
-        } else {
-            player.isMoving = false;
+            // player.isMoving = true;
+            // player.horizontalVelocity = MOVEMENT_SPEED;
+        }
+        if (!keysPressed.ArrowUp && !keysPressed.ArrowRight && !keysPressed.ArrowLeft) {
+            // player.isMoving = false;
             player.horizontalVelocity = 0;
             player.movingDirection = null;
         }
-        // Apply jump if needed (only if on ground)
         if (keysPressed.ArrowUp && !player.isJumping) {
-            player.isMoving = true;
+            // Apply jump if needed (only if on ground)
+            // player.isMoving = true;
             player.isJumping = true;
             player.verticalVelocity = JUMP_VELOCITY;
         }
     } else {
         // IN AIR: Still update direction for rendering/facing but don't change velocity
-        player.isMoving = true;
+        // player.isMoving = true;
+        console.log(player.movingDirection);
     }
 
     // Handle actions
@@ -168,24 +170,31 @@ setInterval(() => {
         // let positionChanged = false;
 
         // Check if player is on the ground
-        const onGround = player.isJumping;
+        const onGround = !player.isJumping;
 
+        // console.log({
+        //     "player.horizontalVelocity": player.horizontalVelocity,
+        //     "player.movingDirection": player.movingDirection,
+        // });
         // Apply movement based on input and current state
-        if (onGround) {
-            // ON GROUND: Direct control with no momentum
-            if (player.isMoving) {
-                if (player.movingDirection === "ArrowLeft") {
-                    player.horizontalVelocity = -MOVEMENT_SPEED;
-                    // positionChanged = true;
-                } else if (player.movingDirection === "ArrowRight") {
-                    player.horizontalVelocity = MOVEMENT_SPEED;
-                    // positionChanged = true;
-                }
-            } else if (!player.isJumping) {
-                // Stop immediately when on ground and no movement input
-                player.horizontalVelocity = 0;
-            }
+        // if (onGround) {
+        // ON GROUND: Direct control with no momentum
+        // if (player.isMoving) {
+        if (player.movingDirection === "ArrowLeft") {
+            player.horizontalVelocity = -MOVEMENT_SPEED;
+            // positionChanged = true;
+        } else if (player.movingDirection === "ArrowRight") {
+            player.horizontalVelocity = MOVEMENT_SPEED;
+            // positionChanged = true;
+        } else {
+            // Stop immediately when on ground and no movement input
+            player.horizontalVelocity = 0;
         }
+        // if (!player.isJumping) {
+        //     // Stop immediately when on ground and no movement input
+        //     player.horizontalVelocity = 0;
+        // }
+        // }
 
         // Apply horizontal movement
         if (player.horizontalVelocity !== 0) {
@@ -207,7 +216,7 @@ setInterval(() => {
                 player.isJumping = false;
 
                 // Stop horizontal momentum on landing
-                player.horizontalVelocity = 0;
+                // player.horizontalVelocity = 0;
 
                 // If still receiving movement input, apply ground movement
                 // if (player.isMoving) {
@@ -312,7 +321,7 @@ io.on("connection", (socket) => {
         x: 100, // Start position
         height: 0, // Height above floor (0 = on floor, positive = above floor)
         color: "#" + Math.floor(Math.random() * 16777215).toString(16),
-        isMoving: false,
+        // isMoving: false,
         movingDirection: null,
         horizontalVelocity: 0,
         isJumping: false,

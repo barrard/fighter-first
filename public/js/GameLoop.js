@@ -1,13 +1,8 @@
-import CONSTS from "http://localhost:3000/js/contants.js";
-import {
-    DrawPlayer,
-    DrawPunch,
-    DrawKick,
-    DrawFaceDirection,
-    DrawYou,
-    DrawFloor,
-    DrawInitialScene,
-} from "http://localhost:3000/js/Draw.js";
+import CONSTS from "/js/contants.js";
+// import CONSTS from "http://localhost:3000/js/contants.js";
+import { DrawPlayer, DrawPunch, DrawKick, DrawFaceDirection, DrawYou, DrawFloor, DrawInitialScene } from "/js/Draw.js";
+// import { DrawPlayer, DrawPunch, DrawKick, DrawFaceDirection, DrawYou, DrawFloor, DrawInitialScene  } from "http://localhost:3000/js/Draw.js";
+
 class GameLoop {
     constructor(myCanvas, socket, inputBatcher) {
         this.socket = socket;
@@ -223,21 +218,29 @@ class GameLoop {
                 y: localFuturePlayer.y,
                 height: localFuturePlayer.height,
                 currentTick: localFuturePlayer.currentTick,
+                horizontalVelocity: localFuturePlayer.horizontalVelocity,
+                verticalVelocity: localFuturePlayer.verticalVelocity,
             };
 
-            console.log({
-                "FROM SERVER.currentTick": serverPlayerLocal.currentTick,
-                "serverPlayerLocal.x": serverPlayerLocal.x,
-                "serverPlayerLocal.y": serverPlayerLocal.y,
-                "serverPlayerLocal.height": serverPlayerLocal.height,
-            });
+            if (localFuturePlayer.isJumping) {
+                console.log({
+                    "FROM SERVER.currentTick": serverPlayerLocal.currentTick,
+                    "serPlyr.x": serverPlayerLocal.x,
+                    // "serPlyr.y": serverPlayerLocal.y,
+                    "serPlyr.height": serverPlayerLocal.height,
+                    "serPlyr.verticalVelocity": serverPlayerLocal.verticalVelocity,
+                    "serPlyr.horizontalVelocity": serverPlayerLocal.horizontalVelocity,
+                });
 
-            console.log({
-                "LOCALFUTUREPLAYER.currentTick": futureClientPosition.currentTick,
-                "futureClientPosition.x": futureClientPosition.x,
-                "futureClientPosition.y": futureClientPosition.y,
-                "futureClientPosition.height": futureClientPosition.height,
-            });
+                console.log({
+                    "LOCALFUTUREPLAYER.currentTick": futureClientPosition.currentTick,
+                    "futClitPos.x": futureClientPosition.x,
+                    "futClitPos.y": futureClientPosition.y,
+                    "futClitPos.height": futureClientPosition.height,
+                    "futClitPos.verticalVelocity": futureClientPosition.verticalVelocity,
+                    "futClitPos.horizontalVelocity": futureClientPosition.horizontalVelocity,
+                });
+            }
 
             // Apply server state
             localFuturePlayer.x = serverPlayerLocal.x;
@@ -281,7 +284,7 @@ class GameLoop {
                     isJumping: localFuturePlayer.isJumping || localFuturePlayer.height > 0,
                 };
 
-                const MS_PER_SERVER_TICK = 1000 / this.SERVER_TICK_RATE; // 50ms per tick
+                // const MS_PER_SERVER_TICK = 1000 / this.SERVER_TICK_RATE; // 50ms per tick
 
                 // Replay each input with proper time scaling
                 for (const input of inputsToReplay) {
@@ -307,11 +310,16 @@ class GameLoop {
                 localFuturePlayer.y = currentState.y;
                 localFuturePlayer.height = currentState.height;
                 localFuturePlayer.facing = currentState.facing;
+                localFuturePlayer.horizontalVelocity = currentState.horizontalVelocity;
+                localFuturePlayer.verticalVelocity = currentState.verticalVelocity;
                 console.log({
-                    "localAfterReconciliation.currentTick": localFuturePlayer.currentTick,
-                    "localAfterReconciliation.x": localFuturePlayer.x,
-                    "localAfterReconciliation.y": localFuturePlayer.y,
-                    "localAfterReconciliation.height": localFuturePlayer.height,
+                    "locAfRecil.currentTick": localFuturePlayer.currentTick,
+                    "locAfRecil.x": localFuturePlayer.x,
+                    "locAfRecil.y": localFuturePlayer.y,
+                    "locAfRecil.height": localFuturePlayer.height,
+                    "locAfRecil.verticalVelocity": localFuturePlayer.verticalVelocity,
+                    "locAfRecil.horizontalVelocity": localFuturePlayer.horizontalVelocity,
+                    "locAfRecil.isJumping": localFuturePlayer.isJumping,
                 });
 
                 this.localX_Adjustment = futureClientPosition.x - localFuturePlayer.x;
@@ -345,9 +353,9 @@ class GameLoop {
             newState.verticalVelocity = this.JUMP_VELOCITY; // Replace with your jump velocity
             newState.isJumping = true;
         }
-        if (!keysPressed.ArrowRight) {
-            console.log("Why not ArrowRight?", keysPressed);
-        }
+        // if (!keysPressed.ArrowRight) {
+        //     console.log("Why not ArrowRight?", keysPressed);
+        // }
 
         // Handle horizontal movement
         if (keysPressed.ArrowLeft) {
@@ -403,9 +411,9 @@ class GameLoop {
         if (player.currentTick !== this.localInputs.currentTick) {
             player.currentTick = this.localInputs.currentTick;
         }
-        if (!this.localInputs.keysPressed.ArrowRight) {
-            console.log("Right should be held", this.localInputs);
-        }
+        // if (!this.localInputs.keysPressed.ArrowRight) {
+        //     console.log("Right should be held", this.localInputs);
+        // }
         this.inputsOnDeck.push({ ...this.localInputs.keysPressed, frame: this.frame });
         // Apply horizontal movement with time scaling
         if (onGround) {
@@ -476,7 +484,6 @@ class GameLoop {
         // const remotePlayers = Array.from(this.allPlayers.values()).filter((p) => p.id !== this.localPlayerId);
 
         console.log({ frame: this.frame });
-        this.frame++;
         if (this.frame - this.prevFrameSent == 3) {
             this.prevFrameSent = this.frame;
             const p = this.allPlayers.get(this.localPlayerId);
@@ -538,6 +545,7 @@ class GameLoop {
 
         // Update player count
         this.myCanvas.status.textContent = `Connected Players: ${this.allPlayers.size}`;
+        this.frame++;
 
         // Continue game loop
         requestAnimationFrame(this.gameLoop.bind(this));

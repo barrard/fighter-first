@@ -60,16 +60,22 @@
             <div id="controls">Controls: Use ← and → arrow keys to move, ↑ to jump</div>
         </div>
 
-        <script src="http://localhost:3000/socket.io/socket.io.js"></script>
+        <script src="/socket.io/socket.io.js"></script>
+        <!-- <script src="http://localhost:3000/socket.io/socket.io.js"></script> -->
         <!-- Main script using ES modules -->
 
         <script type="module">
-            import LatencyMonitor from "http://localhost:3000/js/LatencyMonitor.js";
-            import InputBatchHandler from "http://localhost:3000/js/InputBatchHandler.js";
+            import LatencyMonitor from "/js/LatencyMonitor.js";
+            // import LatencyMonitor from "http://localhost:3000/js/LatencyMonitor.js";
+            import InputBatchHandler from "/js/InputBatchHandler.js";
+            // import InputBatchHandler from "http://localhost:3000/js/InputBatchHandler.js";
 
-            import CONSTS from "http://localhost:3000/js/contants.js";
-            import Canvas from "http://localhost:3000/js/Canvas.js";
-            import GameLoop from "http://localhost:3000/js/GameLoop.js";
+            import CONSTS from "/js/contants.js";
+            // import CONSTS from "http://localhost:3000/js/contants.js";
+            import Canvas from "/js/Canvas.js";
+            // import Canvas from "http://localhost:3000/js/Canvas.js";
+            import GameLoop from "/js/GameLoop.js";
+            // import GameLoop from "http://localhost:3000/js/GameLoop.js";
 
             // Debug connection
             console.log("Script started, attempting to connect to Socket.IO");
@@ -77,7 +83,8 @@
             const FPS_SERVER = 20;
             const SERVER_FPS_TIME = ONE_SECOND / FPS_SERVER;
             // Connect to the server using Socket.io
-            const socket = io("http://localhost:3000", { transports: ["websocket"] });
+            const socket = io("", { transports: ["websocket"] });
+            // const socket = io("http://localhost:3000", { transports: ["websocket"] });
             // Make it available globally if needed
             const latencyMonitor = new LatencyMonitor(socket);
             const inputBatcher = new InputBatchHandler(socket, SERVER_FPS_TIME); // 50ms batching interval
