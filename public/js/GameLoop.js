@@ -1,5 +1,5 @@
-import CONSTS from "/js/contants.js";
-// import CONSTS from "http://localhost:3000/js/contants.js";
+// import CONSTS from "/js/contants.js";
+import CONSTS from "http://localhost:3000/js/contants.js";
 import { DrawPlayer, DrawPunch, DrawKick, DrawFaceDirection, DrawYou, DrawFloor, DrawInitialScene } from "/js/Draw.js";
 // import { DrawPlayer, DrawPunch, DrawKick, DrawFaceDirection, DrawYou, DrawFloor, DrawInitialScene  } from "http://localhost:3000/js/Draw.js";
 
@@ -222,25 +222,25 @@ class GameLoop {
                 verticalVelocity: localFuturePlayer.verticalVelocity,
             };
 
-            if (localFuturePlayer.isJumping) {
-                console.log({
-                    "FROM SERVER.currentTick": serverPlayerLocal.currentTick,
-                    "serPlyr.x": serverPlayerLocal.x,
-                    // "serPlyr.y": serverPlayerLocal.y,
-                    "serPlyr.height": serverPlayerLocal.height,
-                    "serPlyr.verticalVelocity": serverPlayerLocal.verticalVelocity,
-                    "serPlyr.horizontalVelocity": serverPlayerLocal.horizontalVelocity,
-                });
+            // if (localFuturePlayer.isJumping) {
+            console.log({
+                "FROM SERVER.currentTick": serverPlayerLocal.currentTick,
+                "serPlyr.x": serverPlayerLocal.x,
+                // "serPlyr.y": serverPlayerLocal.y,
+                "serPlyr.height": serverPlayerLocal.height,
+                "serPlyr.verticalVelocity": serverPlayerLocal.verticalVelocity,
+                "serPlyr.horizontalVelocity": serverPlayerLocal.horizontalVelocity,
+            });
 
-                console.log({
-                    "LOCALFUTUREPLAYER.currentTick": futureClientPosition.currentTick,
-                    "futClitPos.x": futureClientPosition.x,
-                    "futClitPos.y": futureClientPosition.y,
-                    "futClitPos.height": futureClientPosition.height,
-                    "futClitPos.verticalVelocity": futureClientPosition.verticalVelocity,
-                    "futClitPos.horizontalVelocity": futureClientPosition.horizontalVelocity,
-                });
-            }
+            console.log({
+                "LOCALFUTUREPLAYER.currentTick": futureClientPosition.currentTick,
+                "futClitPos.x": futureClientPosition.x,
+                "futClitPos.y": futureClientPosition.y,
+                "futClitPos.height": futureClientPosition.height,
+                "futClitPos.verticalVelocity": futureClientPosition.verticalVelocity,
+                "futClitPos.horizontalVelocity": futureClientPosition.horizontalVelocity,
+            });
+            // }
 
             // Apply server state
             localFuturePlayer.x = serverPlayerLocal.x;
@@ -351,22 +351,33 @@ class GameLoop {
         // Handle jumping
         if (keysPressed.ArrowUp && !playerState.isJumping) {
             newState.verticalVelocity = this.JUMP_VELOCITY; // Replace with your jump velocity
-            newState.isJumping = true;
+            // newState.isJumping = true;
+            newState.startJump = true;
         }
         // if (!keysPressed.ArrowRight) {
         //     console.log("Why not ArrowRight?", keysPressed);
         // }
 
         // Handle horizontal movement
-        if (keysPressed.ArrowLeft) {
-            newState.horizontalVelocity = -this.MOVEMENT_SPEED; // Replace with your movement speed
-            // newState.facing = "left";
-        } else if (keysPressed.ArrowRight) {
-            newState.horizontalVelocity = this.MOVEMENT_SPEED; // Replace with your movement speed
-            // newState.facing = "right";
-        } else if (!playerState.isJumping) {
-            // Add some deceleration if desired
-            newState.horizontalVelocity = 0; // Friction factor
+        if (!newState.isJumping) {
+            if (keysPressed.ArrowLeft && !keysPressed.ArrowRight) {
+                newState.horizontalVelocity = -this.MOVEMENT_SPEED; // Replace with your movement speed
+                // newState.facing = "left";
+            } else if (keysPressed.ArrowRight && !keysPressed.ArrowLeft) {
+                newState.horizontalVelocity = this.MOVEMENT_SPEED; // Replace with your movement speed
+                // newState.facing = "right";
+            } else if (!keysPressed.ArrowRight && !keysPressed.ArrowLeft) {
+                // Add some deceleration if desired
+                newState.horizontalVelocity = 0; // Friction factor
+            } else if (keysPressed.ArrowRight && keysPressed.ArrowLeft) {
+                // Add some deceleration if desired
+                newState.horizontalVelocity = 0; // Friction factor
+            }
+            if (keysPressed.ArrowDown && !newState.isCrouching) {
+                newState.isCrouching = true;
+            } else if (!keysPressed.ArrowDown) {
+                newState.isCrouching = false;
+            }
         }
 
         // Update position with time-scaled movement
@@ -374,7 +385,7 @@ class GameLoop {
         newState.height -= newState.verticalVelocity;
 
         // Handle landing
-        if (newState.height <= 0) {
+        if (newState.height <= 0 && newState.isJumping) {
             newState.height = 0;
             newState.verticalVelocity = 0;
             newState.isJumping = false;
@@ -384,8 +395,12 @@ class GameLoop {
         }
 
         // Update y position based on height
-        newState.y = this.FLOOR_Y - this.PLAYER_HEIGHT - newState.height;
+        newState.y = this.FLOOR_Y - this.PLAYER_HEIGHT / (newState.isCrouching ? 2 : 1) - newState.height;
         // ;
+        if (newState.startJump) {
+            newState.startJump = false;
+            newState.isJumping = true;
+        }
         return newState;
     }
     // Updated updateLocalPlayerGameLoop with smoother local prediction
@@ -396,6 +411,7 @@ class GameLoop {
 
         // Check if player is on the ground or in the air
         const onGround = !this.isJumping;
+        player.isJumping = this.isJumping;
 
         console.log({
             "pcGL.currentTick Start": player.currentTick,
@@ -417,22 +433,30 @@ class GameLoop {
         this.inputsOnDeck.push({ ...this.localInputs.keysPressed, frame: this.frame });
         // Apply horizontal movement with time scaling
         if (onGround) {
+            const keysPressed = this.localInputs.keysPressed;
             // Direct ground control
-            if (this.localInputs.keysPressed.ArrowLeft) {
+            if (keysPressed.ArrowLeft && !keysPressed.ArrowRight) {
                 this.horizontalVelocity = -this.MOVEMENT_SPEED;
-            } else if (this.localInputs.keysPressed.ArrowRight) {
+            } else if (keysPressed.ArrowRight && !keysPressed.ArrowLeft) {
                 this.horizontalVelocity = this.MOVEMENT_SPEED;
-            } else if (!this.isJumping) {
-                // Force stop if no keys are pressed or if it's been too long since input
-                // if (currentTime - lastInputTime > inputCooldown) {
+            } else if (!keysPressed.ArrowRight && !keysPressed.ArrowLeft) {
                 this.horizontalVelocity = 0;
-                // }
             }
-        }
-        if (this.localInputs.isJumping && !this.isJumping) {
-            player.verticalVelocity = this.JUMP_VELOCITY;
-            this.isJumping = true;
-            this.localInputs.isJumping = false;
+            if (keysPressed.ArrowUp) {
+                // Apply jump if needed (only if on ground)
+                // player.isMoving = true;
+                this.isJumping = true;
+                player.isJumping = this.isJumping;
+
+                player.verticalVelocity = this.JUMP_VELOCITY;
+            }
+
+            //crouch
+            if (keysPressed.ArrowDown && !player.isCrouching) {
+                player.isCrouching = true;
+            } else if (!keysPressed.ArrowDown) {
+                player.isCrouching = false;
+            }
         }
 
         // Apply horizontal velocity with smoothing
@@ -461,6 +485,7 @@ class GameLoop {
                 player.verticalVelocity = 0;
                 this.isJumping = false;
                 this.localInputs.isJumping = false;
+                player.isJumping = false;
             }
             player.y = this.FLOOR_Y - this.PLAYER_HEIGHT - player.height;
         }

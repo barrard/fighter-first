@@ -1,6 +1,6 @@
 import { DrawPlayer, DrawPunch, DrawKick, DrawFaceDirection, DrawYou, DrawFloor, DrawInitialScene } from "/js/Draw.js";
-import CONSTS from "/js/contants.js";
-// import CONSTS from "http://localhost:3000/js/contants.js";
+// import CONSTS from "/js/contants.js";
+import CONSTS from "http://localhost:3000/js/contants.js";
 export default class Canvas {
     constructor() {
         this.canvas = document.getElementById("gameCanvas");

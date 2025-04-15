@@ -14,9 +14,9 @@ export default class InputBatchHandler {
         this.setDefaultInputState();
 
         // Track special action states
-        this.isJumping = false;
-        this.isPunching = false;
-        this.isKicking = false;
+        // this.isJumping = false;
+        // this.isPunching = false;
+        // this.isKicking = false;
 
         // Constants for animation durations
         this.PUNCH_DURATION = 300;
@@ -48,6 +48,7 @@ export default class InputBatchHandler {
             ArrowLeft: false,
             ArrowRight: false,
             ArrowUp: false,
+            ArrowDown: false,
             KeyP: false,
             KeyK: false,
         };
@@ -101,22 +102,19 @@ export default class InputBatchHandler {
         }
         // }
         // Handle jump
-        if (keyCode === "ArrowUp" && !this.isJumping) {
+        if (keyCode === "ArrowUp") {
             console.log("Jump key pressed");
             this.keysPressed.ArrowUp = true;
-            this.isJumping = true;
         }
 
         // Handle punch
-        if (keyCode === "KeyP" && !this.isPunching && !this.isKicking) {
+        if (keyCode === "KeyP") {
             console.log("Punch key pressed");
-            this.isPunching = true;
 
             this.keysPressed.KeyP = true;
 
             // Set timeout to reset punch state
             setTimeout(() => {
-                this.isPunching = false;
                 this.keysPressed.KeyP = false;
             }, this.PUNCH_DURATION);
         }
@@ -124,12 +122,10 @@ export default class InputBatchHandler {
         // Handle kick
         if (keyCode === "KeyK" && !this.isKicking && !this.isPunching) {
             console.log("Kick key pressed");
-            this.isKicking = true;
             this.keysPressed.KeyK = false;
 
             // Set timeout to reset kick state
             setTimeout(() => {
-                this.isKicking = false;
                 this.keysPressed.KeyK = false;
             }, this.KICK_DURATION);
         }
@@ -155,12 +151,12 @@ export default class InputBatchHandler {
     }
 
     // Method to reset jump state (can be called by game physics)
-    resetJump() {
-        if (this.isJumping) {
-            this.isJumping = false;
-            this.stateChanged = true;
-        }
-    }
+    // resetJump() {
+    //     if (this.isJumping) {
+    //         this.isJumping = false;
+    //         this.stateChanged = true;
+    //     }
+    // }
 
     // Clean up when no longer needed
     destroy() {

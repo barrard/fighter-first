@@ -1,5 +1,5 @@
-import CONSTS from "/js/contants.js";
-// import CONSTS from "http://localhost:3000/js/contants.js";
+// import CONSTS from "/js/contants.js";
+import CONSTS from "http://localhost:3000/js/contants.js";
 
 const {
     PREDICTION_BUFFER_MS,
@@ -23,6 +23,7 @@ const {
     LEG_HEIGHT,
     LEG_Y_OFFSET,
 } = CONSTS();
+
 export function DrawPlayer(ctx, player) {
     // Draw player rectangle
     ctx.fillStyle = player.color || "#FF0000"; // Default to red if no color

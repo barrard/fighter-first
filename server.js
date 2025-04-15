@@ -103,14 +103,20 @@ function handlePlayerInput(player) {
     // Only apply horizontal movement changes if on ground
     if (onGround) {
         // ON GROUND: Direct control with no momentum
-        if (keysPressed.ArrowLeft) {
+        if (keysPressed.ArrowLeft && !keysPressed.ArrowRight) {
             player.movingDirection = "ArrowLeft";
             // player.isMoving = true;
             // player.horizontalVelocity = -MOVEMENT_SPEED;
-        } else if (keysPressed.ArrowRight) {
+        } else if (keysPressed.ArrowRight && !keysPressed.ArrowLeft) {
             player.movingDirection = "ArrowRight";
             // player.isMoving = true;
             // player.horizontalVelocity = MOVEMENT_SPEED;
+        } else if (!keysPressed.ArrowLeft && !keysPressed.ArrowRight) {
+            player.movingDirection = null;
+            player.horizontalVelocity = 0;
+        } else if (keysPressed.ArrowLeft && keysPressed.ArrowRight) {
+            player.movingDirection = null;
+            player.horizontalVelocity = 0;
         }
         if (!keysPressed.ArrowUp && !keysPressed.ArrowRight && !keysPressed.ArrowLeft) {
             // player.isMoving = false;
@@ -265,7 +271,7 @@ setInterval(() => {
     // }
 
     // }
-}, 1000 / 60); // ~60 fps
+}, 1000 / 61); // ~60 fps
 
 // Function to update player facing directions
 function updatePlayerFacingDirections() {
