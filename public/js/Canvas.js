@@ -35,8 +35,11 @@ export default class Canvas {
             LEG_WIDTH,
             LEG_HEIGHT,
             LEG_Y_OFFSET,
-        } = CONSTS(this.canvas);
+            CANVAS_HEIGHT,
+        } = CONSTS;
         this.FLOOR_HEIGHT = FLOOR_HEIGHT;
+        this.FLOOR_Y = CANVAS_HEIGHT - FLOOR_HEIGHT;
+
         // Initial resize and event listener
 
         this.resizeCanvas();

@@ -55,7 +55,7 @@
     </head>
     <body>
         <div id="gameContainer">
-            <canvas id="gameCanvas"></canvas>
+            <canvas width="800" height="600" id="gameCanvas"></canvas>
             <div id="status">Connecting to server...</div>
             <div id="controls">Controls: Use ← and → arrow keys to move, ↑ to jump</div>
         </div>
@@ -112,9 +112,10 @@
                 ARM_Y_OFFSET,
                 LEG_WIDTH,
                 LEG_HEIGHT,
-
+                CANVAS_HEIGHT,
+                CANVAS_WIDTH,
                 LEG_Y_OFFSET,
-            } = CONSTS();
+            } = CONSTS;
             // let FLOOR_Y = canvas.height - FLOOR_HEIGHT;
             // Add these variables at the top level of your code
             // let serverPosition = { x: 0, y: 0, height: 0 }; // Last known authoritative position

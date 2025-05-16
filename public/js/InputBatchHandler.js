@@ -142,10 +142,10 @@ export default class InputBatchHandler {
             this.sentInputWithTicks.shift();
         }
         this.gameLoop.inputsOnDeck = [];
-        console.log(this.sentInputWithTicks.map((d) => d.currentTick));
-        console.log({
-            "sendBatch.currentTick": this.currentTick,
-        });
+        // console.log(this.sentInputWithTicks.map((d) => d.currentTick));
+        // console.log({
+        //     "sendBatch.currentTick": this.currentTick,
+        // });
         // Send the current state to the server
         this.socket.emit("playerInputBatch", data);
     }

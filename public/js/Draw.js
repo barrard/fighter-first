@@ -22,7 +22,7 @@ const {
     LEG_WIDTH,
     LEG_HEIGHT,
     LEG_Y_OFFSET,
-} = CONSTS();
+} = CONSTS;
 
 export function DrawPlayer(ctx, player) {
     // Draw player rectangle
@@ -52,7 +52,9 @@ export function DrawPunch(ctx, player) {
 }
 
 export function DrawInitialScene(canvas, ctx) {
-    const { FLOOR_HEIGHT, FLOOR_Y } = CONSTS(canvas);
+    const { FLOOR_HEIGHT, CANVAS_HEIGHT } = CONSTS;
+    const FLOOR_Y = CANVAS_HEIGHT - FLOOR_HEIGHT;
+
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Draw floor

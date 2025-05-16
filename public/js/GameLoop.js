@@ -25,7 +25,7 @@ class GameLoop {
         this.totalXBeenAdjusted = 0;
         setInterval(() => {
             const diff = this.frame - this.prevFrame;
-            console.log({ prevFrame: this.prevFrame, frame: this.frame, diff });
+            // console.log({ prevFrame: this.prevFrame, frame: this.frame, diff });
             this.prevFrame = this.frame;
         }, 1000);
 
@@ -37,7 +37,7 @@ class GameLoop {
             PLAYER_WIDTH,
             PLAYER_HEIGHT,
             MOVEMENT_SPEED,
-            // FLOOR_HEIGHT,
+            FLOOR_HEIGHT,
             JUMP_VELOCITY,
             GRAVITY,
             AIR_RESISTANCE,
@@ -52,8 +52,10 @@ class GameLoop {
             FLOOR_Y,
             LEG_Y_OFFSET,
             SERVER_TICK_RATE,
-        } = CONSTS(this.canvas);
+            CANVAS_HEIGHT,
+        } = CONSTS;
 
+        this.FLOOR_Y = CANVAS_HEIGHT - FLOOR_HEIGHT;
         this.MOVEMENT_SPEED = MOVEMENT_SPEED;
         this.JUMP_VELOCITY = JUMP_VELOCITY;
         this.GRAVITY = GRAVITY;
@@ -69,7 +71,6 @@ class GameLoop {
         this.LEG_HEIGHT = LEG_HEIGHT;
         this.PLAYER_HEIGHT = PLAYER_HEIGHT;
         this.PLAYER_WIDTH = PLAYER_WIDTH;
-        this.FLOOR_Y = FLOOR_Y;
 
         this.init();
     }
@@ -78,7 +79,9 @@ class GameLoop {
         this.localInputs.gameLoop = this;
         // Initialize game state
         this.socket.on("init", (serverData) => {
-            console.log("Received init serverData:", serverData);
+            debugger;
+
+            // console.log("Received init serverData:", serverData);
             if (this.localPlayerId != serverData.playerId) {
                 this.localPlayerId = serverData.playerId;
             }
@@ -97,13 +100,14 @@ class GameLoop {
                 this.allPlayers.set(serverPlayer.id, serverPlayer);
             });
 
-            console.log("this.Players initialized:", this.allPlayers.size);
+            // console.log("this.Players initialized:", this.allPlayers.size);
             this.gameLoop.bind(this)();
         });
 
         // Handle new player joining
         this.socket.on("playerJoined", (serverPlayer) => {
-            console.log("New serverPlayer joined:", serverPlayer.id);
+            debugger;
+            // console.log("New serverPlayer joined:", serverPlayer.id);
             // Set initial y position on the floor
             serverPlayer.y = this.FLOOR_Y - this.PLAYER_HEIGHT;
             // Set default facing direction if not provided
@@ -129,7 +133,7 @@ class GameLoop {
 
         // Handle player leaving
         this.socket.on("playerLeft", (id) => {
-            console.log("Player left:", id);
+            // console.log("Player left:", id);
             this.allPlayers.delete(id);
         });
 
@@ -144,7 +148,7 @@ class GameLoop {
                     // Other players - interpolate movement
                     let otherPlayer = this.allPlayers.get(serverPlayer.id);
                     if (!otherPlayer) {
-                        console.log("Creating new remote player:", serverPlayer.id);
+                        // console.log("Creating new remote player:", serverPlayer.id);
                         otherPlayer = {
                             id: serverPlayer.id,
                             x: serverPlayer.x,
@@ -223,23 +227,23 @@ class GameLoop {
             };
 
             // if (localFuturePlayer.isJumping) {
-            console.log({
-                "FROM SERVER.currentTick": serverPlayerLocal.currentTick,
-                "serPlyr.x": serverPlayerLocal.x,
-                // "serPlyr.y": serverPlayerLocal.y,
-                "serPlyr.height": serverPlayerLocal.height,
-                "serPlyr.verticalVelocity": serverPlayerLocal.verticalVelocity,
-                "serPlyr.horizontalVelocity": serverPlayerLocal.horizontalVelocity,
-            });
+            // console.log({
+            //     "FROM SERVER.currentTick": serverPlayerLocal.currentTick,
+            //     "serPlyr.x": serverPlayerLocal.x,
+            //     // "serPlyr.y": serverPlayerLocal.y,
+            //     "serPlyr.height": serverPlayerLocal.height,
+            //     "serPlyr.verticalVelocity": serverPlayerLocal.verticalVelocity,
+            //     "serPlyr.horizontalVelocity": serverPlayerLocal.horizontalVelocity,
+            // });
 
-            console.log({
-                "LOCALFUTUREPLAYER.currentTick": futureClientPosition.currentTick,
-                "futClitPos.x": futureClientPosition.x,
-                "futClitPos.y": futureClientPosition.y,
-                "futClitPos.height": futureClientPosition.height,
-                "futClitPos.verticalVelocity": futureClientPosition.verticalVelocity,
-                "futClitPos.horizontalVelocity": futureClientPosition.horizontalVelocity,
-            });
+            // console.log({
+            //     "LOCALFUTUREPLAYER.currentTick": futureClientPosition.currentTick,
+            //     "futClitPos.x": futureClientPosition.x,
+            //     "futClitPos.y": futureClientPosition.y,
+            //     "futClitPos.height": futureClientPosition.height,
+            //     "futClitPos.verticalVelocity": futureClientPosition.verticalVelocity,
+            //     "futClitPos.horizontalVelocity": futureClientPosition.horizontalVelocity,
+            // });
             // }
 
             // Apply server state
@@ -266,10 +270,10 @@ class GameLoop {
                 // Remove all inputs up to and including the current server tick
                 // as they've been processed by the server
                 const inputsToReplay = sentInputWithTicks.slice(matchingServerTickIndex);
-                console.log(
-                    "inputsToReplay ",
-                    inputsToReplay.map((d) => d.currentTick)
-                );
+                // console.log(
+                //     "inputsToReplay ",
+                //     inputsToReplay.map((d) => d.currentTick)
+                // );
                 // Remove processed inputs from our sent inputs array
                 this.localInputs.sentInputWithTicks = inputsToReplay;
 
@@ -296,10 +300,10 @@ class GameLoop {
                     }
                 }
 
-                console.log(
-                    "inputsOnDeck ",
-                    this.inputsOnDeck.map((d) => d)
-                );
+                // console.log(
+                //     "inputsOnDeck ",
+                //     this.inputsOnDeck.map((d) => d)
+                // );
 
                 for (let x = 0; x < this.inputsOnDeck.length; x++) {
                     currentState = this.simulatePlayerMovementFrame(currentState, this.inputsOnDeck[x]);
@@ -312,15 +316,15 @@ class GameLoop {
                 localFuturePlayer.facing = currentState.facing;
                 localFuturePlayer.horizontalVelocity = currentState.horizontalVelocity;
                 localFuturePlayer.verticalVelocity = currentState.verticalVelocity;
-                console.log({
-                    "locAfRecil.currentTick": localFuturePlayer.currentTick,
-                    "locAfRecil.x": localFuturePlayer.x,
-                    "locAfRecil.y": localFuturePlayer.y,
-                    "locAfRecil.height": localFuturePlayer.height,
-                    "locAfRecil.verticalVelocity": localFuturePlayer.verticalVelocity,
-                    "locAfRecil.horizontalVelocity": localFuturePlayer.horizontalVelocity,
-                    "locAfRecil.isJumping": localFuturePlayer.isJumping,
-                });
+                // console.log({
+                //     "locAfRecil.currentTick": localFuturePlayer.currentTick,
+                //     "locAfRecil.x": localFuturePlayer.x,
+                //     "locAfRecil.y": localFuturePlayer.y,
+                //     "locAfRecil.height": localFuturePlayer.height,
+                //     "locAfRecil.verticalVelocity": localFuturePlayer.verticalVelocity,
+                //     "locAfRecil.horizontalVelocity": localFuturePlayer.horizontalVelocity,
+                //     "locAfRecil.isJumping": localFuturePlayer.isJumping,
+                // });
 
                 this.localX_Adjustment = futureClientPosition.x - localFuturePlayer.x;
                 if (this.localX_Adjustment > 20) {
@@ -413,17 +417,17 @@ class GameLoop {
         const onGround = !this.isJumping;
         player.isJumping = this.isJumping;
 
-        console.log({
-            "pcGL.currentTick Start": player.currentTick,
-            "pcGL.currentFrame Start": player.currentFrame,
-            x: player.x,
-            y: player.y,
-            height: player.height,
-            horizontalVelocity: player.horizontalVelocity,
-            verticalVelocity: player.verticalVelocity,
-            facing: player.facing,
-            isJumping: player.isJumping,
-        });
+        // console.log({
+        //     "pcGL.currentTick Start": player.currentTick,
+        //     "pcGL.currentFrame Start": player.currentFrame,
+        //     x: player.x,
+        //     y: player.y,
+        //     height: player.height,
+        //     horizontalVelocity: player.horizontalVelocity,
+        //     verticalVelocity: player.verticalVelocity,
+        //     facing: player.facing,
+        //     isJumping: player.isJumping,
+        // });
         if (player.currentTick !== this.localInputs.currentTick) {
             player.currentTick = this.localInputs.currentTick;
         }
@@ -489,18 +493,18 @@ class GameLoop {
             }
             player.y = this.FLOOR_Y - this.PLAYER_HEIGHT - player.height;
         }
-        console.log({
-            "pcGL.currentTick end": player.currentTick,
-            "pcGL.currentFrame end": player.currentFrame,
+        // console.log({
+        //     "pcGL.currentTick end": player.currentTick,
+        //     "pcGL.currentFrame end": player.currentFrame,
 
-            x: player.x,
-            y: player.y,
-            height: player.height,
-            horizontalVelocity: player.horizontalVelocity,
-            verticalVelocity: player.verticalVelocity,
-            facing: player.facing,
-            isJumping: player.isJumping,
-        });
+        //     x: player.x,
+        //     y: player.y,
+        //     height: player.height,
+        //     horizontalVelocity: player.horizontalVelocity,
+        //     verticalVelocity: player.verticalVelocity,
+        //     facing: player.facing,
+        //     isJumping: player.isJumping,
+        // });
     }
 
     gameLoop() {
@@ -508,16 +512,16 @@ class GameLoop {
         // const localPlayer = this.allPlayers.get(this.localPlayerId);
         // const remotePlayers = Array.from(this.allPlayers.values()).filter((p) => p.id !== this.localPlayerId);
 
-        console.log({ frame: this.frame });
+        // console.log({ frame: this.frame });
         if (this.frame - this.prevFrameSent == 3) {
             this.prevFrameSent = this.frame;
             const p = this.allPlayers.get(this.localPlayerId);
-            console.log({
-                isMoving: p.isMoving,
-                ArrowRight: this.localInputs.keysPressed["ArrowRight"],
-                ArrowLeft: this.localInputs.keysPressed["ArrowLeft"],
-                ArrowUp: this.localInputs.keysPressed["ArrowUp"],
-            });
+            // console.log({
+            //     isMoving: p.isMoving,
+            //     ArrowRight: this.localInputs.keysPressed["ArrowRight"],
+            //     ArrowLeft: this.localInputs.keysPressed["ArrowLeft"],
+            //     ArrowUp: this.localInputs.keysPressed["ArrowUp"],
+            // });
             this.localInputs.sendBatch(); //.bind(this.localInputs);
             this.localInputs.updateTick(); //.bind(this.localInputs);
         }
