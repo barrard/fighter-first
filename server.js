@@ -179,117 +179,117 @@ function addInputBatchToPlayer(batchInput, socket) {
 }
 
 // Game loop for authoritative movement
-// setInterval(() => {
-//     serverTick++;
-//     // let updated = false;
+setInterval(() => {
+    serverTick++;
+    // let updated = false;
 
-//     // Update player facing directions based on opponents' positions
-//     updatePlayerFacingDirections();
+    // Update player facing directions based on opponents' positions
+    updatePlayerFacingDirections();
 
-//     // Update all players
-//     gameState.players.forEach((player) => {
-//         handlePlayerInput(player);
-//         // console.log(player.movingDirection);
-//         player.serverTick = serverTick;
-//         // let positionChanged = false;
+    // Update all players
+    gameState.players.forEach((player) => {
+        handlePlayerInput(player);
+        // console.log(player.movingDirection);
+        player.serverTick = serverTick;
+        // let positionChanged = false;
 
-//         // Check if player is on the ground
-//         const onGround = !player.isJumping;
+        // Check if player is on the ground
+        const onGround = !player.isJumping;
 
-//         // console.log({
-//         //     "player.horizontalVelocity": player.horizontalVelocity,
-//         //     "player.movingDirection": player.movingDirection,
-//         // });
-//         // Apply movement based on input and current state
-//         // if (onGround) {
-//         // ON GROUND: Direct control with no momentum
-//         // if (player.isMoving) {
-//         if (player.movingDirection === "ArrowLeft") {
-//             player.horizontalVelocity = -MOVEMENT_SPEED;
-//             // positionChanged = true;
-//         } else if (player.movingDirection === "ArrowRight") {
-//             player.horizontalVelocity = MOVEMENT_SPEED;
-//             // positionChanged = true;
-//         } else {
-//             // Stop immediately when on ground and no movement input
-//             player.horizontalVelocity = 0;
-//         }
-//         // if (!player.isJumping) {
-//         //     // Stop immediately when on ground and no movement input
-//         //     player.horizontalVelocity = 0;
-//         // }
-//         // }
+        // console.log({
+        //     "player.horizontalVelocity": player.horizontalVelocity,
+        //     "player.movingDirection": player.movingDirection,
+        // });
+        // Apply movement based on input and current state
+        // if (onGround) {
+        // ON GROUND: Direct control with no momentum
+        // if (player.isMoving) {
+        if (player.movingDirection === "ArrowLeft") {
+            player.horizontalVelocity = -MOVEMENT_SPEED;
+            // positionChanged = true;
+        } else if (player.movingDirection === "ArrowRight") {
+            player.horizontalVelocity = MOVEMENT_SPEED;
+            // positionChanged = true;
+        } else {
+            // Stop immediately when on ground and no movement input
+            player.horizontalVelocity = 0;
+        }
+        // if (!player.isJumping) {
+        //     // Stop immediately when on ground and no movement input
+        //     player.horizontalVelocity = 0;
+        // }
+        // }
 
-//         // Apply horizontal movement
-//         if (player.horizontalVelocity !== 0) {
-//             player.x += player.horizontalVelocity;
-//             player.x = Math.max(0, Math.min(5000 - PLAYER_WIDTH, player.x)); // Some large value as a safeguard
-//             // positionChanged = true;
-//         }
+        // Apply horizontal movement
+        if (player.horizontalVelocity !== 0) {
+            player.x += player.horizontalVelocity;
+            player.x = Math.max(0, Math.min(937 - PLAYER_WIDTH, player.x)); // Some large value as a safeguard
+            // positionChanged = true;
+        }
 
-//         // Handle jumping and gravity
-//         if (player.isJumping) {
-//             player.height -= player.verticalVelocity;
-//             player.verticalVelocity += GRAVITY;
-//             // positionChanged = true;
+        // Handle jumping and gravity
+        if (player.isJumping) {
+            player.height -= player.verticalVelocity;
+            player.verticalVelocity += GRAVITY;
+            // positionChanged = true;
 
-//             // Check if player has landed
-//             if (player.height <= 0) {
-//                 player.height = 0;
-//                 player.verticalVelocity = 0;
-//                 player.isJumping = false;
+            // Check if player has landed
+            if (player.height <= 0) {
+                player.height = 0;
+                player.verticalVelocity = 0;
+                player.isJumping = false;
 
-//                 // Stop horizontal momentum on landing
-//                 // player.horizontalVelocity = 0;
+                // Stop horizontal momentum on landing
+                // player.horizontalVelocity = 0;
 
-//                 // If still receiving movement input, apply ground movement
-//                 // if (player.isMoving) {
-//                 //     if (player.movingDirection === "ArrowLeft") {
-//                 //         player.horizontalVelocity = -MOVEMENT_SPEED;
-//                 //     } else if (player.movingDirection === "ArrowRight") {
-//                 //         player.horizontalVelocity = MOVEMENT_SPEED;
-//                 //     }
-//                 // }
-//             }
-//         }
+                // If still receiving movement input, apply ground movement
+                // if (player.isMoving) {
+                //     if (player.movingDirection === "ArrowLeft") {
+                //         player.horizontalVelocity = -MOVEMENT_SPEED;
+                //     } else if (player.movingDirection === "ArrowRight") {
+                //         player.horizontalVelocity = MOVEMENT_SPEED;
+                //     }
+                // }
+            }
+        }
 
-//         // if (positionChanged) {
-//         //     updated = true;
-//         // }
-//     });
+        // if (positionChanged) {
+        //     updated = true;
+        // }
+    });
 
-//     // Broadcast updated positions
+    // Broadcast updated positions
 
-//     const timeSent = Date.now();
-//     // console.log("serverTick", serverTick);
-//     // const timeDiff = timeSent - lastTimeSent;
-//     const tickDiff = serverTick - lastServerTick;
+    const timeSent = Date.now();
+    // console.log("serverTick", serverTick);
+    // const timeDiff = timeSent - lastTimeSent;
+    const tickDiff = serverTick - lastServerTick;
 
-//     if (tickDiff == 3) {
-//         dataSent++;
+    if (tickDiff == 3) {
+        dataSent++;
 
-//         lastServerTick = serverTick;
-//         lastTimeSent = timeSent;
-//         const players = Array.from(gameState.players.values()).map((player) => ({
-//             id: player.id,
-//             x: player.x,
-//             currentTick: player.currentTick,
-//             height: player.height,
-//             facing: player.facing,
-//             isJumping: player.isJumping,
-//             isKicking: player.isKicking,
-//             isPunching: player.isPunching,
-//             verticalVelocity: player.verticalVelocity,
-//             horizontalVelocity: player.horizontalVelocity, // Add this line
-//             lastProcessedInput: player.lastProcessedInput || 0,
-//             serverTick: player.serverTick,
-//         }));
-//         io.emit("gameState", { players });
-//     }
-//     // }
+        lastServerTick = serverTick;
+        lastTimeSent = timeSent;
+        const players = Array.from(gameState.players.values()).map((player) => ({
+            id: player.id,
+            x: player.x,
+            currentTick: player.currentTick,
+            height: player.height,
+            facing: player.facing,
+            isJumping: player.isJumping,
+            isKicking: player.isKicking,
+            isPunching: player.isPunching,
+            verticalVelocity: player.verticalVelocity,
+            horizontalVelocity: player.horizontalVelocity, // Add this line
+            lastProcessedInput: player.lastProcessedInput || 0,
+            serverTick: player.serverTick,
+        }));
+        io.emit("gameState", { players });
+    }
+    // }
 
-//     // }
-// }, 1000 / 61); // ~60 fps
+    // }
+}, 1000 / 61); // ~60 fps
 
 // Function to update player facing directions
 function updatePlayerFacingDirections() {
@@ -369,6 +369,10 @@ io.on("connection", (socket) => {
     socket.on("characterSelected", (selectedChar) => {
         //get the type of socket, player1 player2 or spectator
         const room = GameRoom.socketIdToRoom[socket.id];
+        if (!room) {
+            socket.emit("error", { message: "You are not in a room" });
+            return;
+        }
         const isPlayer1 = room.player1.id == socket.id;
         const isPlayer2 = room.player2.id == socket.id;
 
@@ -385,8 +389,10 @@ io.on("connection", (socket) => {
         const username = socketNames[socket.id];
         if (isPlayer1) {
             room.player1.character = character;
+            room.player1.gameState = gameState.players.get(socket.id);
         } else if (isPlayer2) {
-            room.player2.Character = character;
+            room.player2.character = character;
+            room.player2.gameState = gameState.players.get(socket.id);
         }
 
         io.to(room.roomName).emit("characterSelected", {
@@ -394,6 +400,17 @@ io.on("connection", (socket) => {
             character,
             username,
         });
+
+        if (room.player1.character && room.player2.character) {
+            io.to(room.roomName).emit("initServerPlayers", {
+                // playerId: playerId,
+                players: [room.player1.gameState, room.player2.gameState],
+                // players: Array.from(gameState.players.values()),
+            });
+
+            // Broadcast new player to all other players
+            io.to(room.roomName).emit("playerJoined", player);
+        }
     });
 
     socket.on("verifyRoom", (roomName) => {
@@ -404,14 +421,16 @@ io.on("connection", (socket) => {
         //will be player1, player2, or spectator
         const inRoomAs = room?.inRoomAs(socket);
         if (!inRoomAs || inRoomAs == "unknown") {
-            if (!inRoom) {
+            if (inRoom) {
                 //remove from room
                 socket.leave(roomName);
             }
             socket.emit("error", { message: "You are not in this room" });
+            socket.emit("roomVerified", inRoomAs);
         } else if (inRoomAs !== "unknown" && inRoom) {
             socket.emit("roomVerified", inRoomAs);
         }
+        console.log(`verifyRoom: Socket ${socket.id} is in room ${roomName} as ${inRoomAs}`);
     });
     socket.join("waitingRoom");
 
@@ -426,6 +445,10 @@ io.on("connection", (socket) => {
         room.addSocketToRoom(socket);
         // socket.join(roomName);
         // socket.emit("joinGameRoom", { username, roomName });
+        socket.broadcast.emit(
+            "roomsList",
+            Object.values(gameRooms).map((gr) => gr.toDto())
+        );
     });
 
     socket.on("leaveRoom", (roomName) => {
@@ -436,6 +459,10 @@ io.on("connection", (socket) => {
             return;
         }
         room.removeSocketFromRoom(socket);
+        socket.broadcast.emit(
+            "roomsList",
+            Object.values(gameRooms).map((gr) => gr.toDto())
+        );
     });
 
     socket.on("createRoom", ({ roomName }) => {
@@ -447,12 +474,12 @@ io.on("connection", (socket) => {
             return;
         }
         const newRoom = new GameRoom({ owner: socket.id, roomName });
+        gameRooms[roomName] = newRoom;
+        newRoom.addSocketToRoom(socket);
         socket.broadcast.emit(
             "roomsList",
             Object.values(gameRooms).map((gr) => gr.toDto())
         );
-        newRoom.addSocketToRoom(socket);
-        gameRooms[roomName] = newRoom;
     });
 
     socket.on("getRooms", () => {
@@ -497,13 +524,16 @@ io.on("connection", (socket) => {
     gameState.players.set(playerId, player);
 
     // Send initial state to the new player
-    socket.emit("init", {
-        playerId: playerId,
-        players: Array.from(gameState.players.values()),
-    });
+    // socket.emit("init", {
+    //     playerId: playerId,
+    //     players: Array.from(gameState.players.values()),
+    // });
 
-    // Broadcast new player to all other players
-    socket.broadcast.emit("playerJoined", player);
+    const room = GameRoom.socketIdToRoom[playerId];
+    if (room) {
+        // Broadcast new player to all other players
+        io.to(room.roomName).emit("playerJoined", player);
+    }
 
     socket.on("playerInputBatch", (data) => addInputBatchToPlayer(data, socket));
 
@@ -511,6 +541,14 @@ io.on("connection", (socket) => {
     socket.on("disconnect", () => {
         console.log("User disconnected", playerId);
         gameState.players.delete(playerId);
+        //remove from room
+        const room = GameRoom.socketIdToRoom[playerId];
+        if (room) {
+            room.removeSocketFromRoom(socket);
+        }
+        delete GameRoom.socketIdToRoom[socket.id];
+        delete socketNames[socket.id];
+        // Broadcast player left to all other players
         io.emit("playerLeft", playerId);
     });
 });
@@ -527,15 +565,20 @@ class GameRoom {
         this.roomName = roomName;
         this.owner = owner;
         this.spectators = {};
-        this.player1 = {};
+        this.player1 = owner;
         this.player2 = {};
+        this.players = 0;
     }
 
     toDto() {
         return {
             roomName: decodeURIComponent(this.roomName),
+            owner: this.owner,
+            players: this.players,
             player1: this.player1.id,
+            player1Character: this.player1.character,
             player2: this.player2.id,
+            player2Character: this.player2.character,
             spectators: Object.keys(this.spectators),
         };
     }
@@ -549,16 +592,43 @@ class GameRoom {
     removeSocketFromRoom(socket) {
         socket.leave(this.roomName);
         GameRoom.socketIdToRoom[socket.id] = null;
+        const game = gameRooms[this.roomName];
+        let isPlayer1 = false;
+        if (game.inRoomAs(socket) == "player1") {
+            this.player1 = {};
+            this.players -= 1;
+            isPlayer1 = true;
+        } else if (game.inRoomAs(socket) == "player2") {
+            this.player2 = {};
+            this.players -= 1;
+            isPlayer1 = false;
+        } else if (game.inRoomAs(socket) == "spectator") {
+            delete this.spectators[socket.id];
+            return; //don't both running the emit
+        }
+
+        io.to(this.roomName).emit("characterSelected", {
+            isPlayer1,
+            character: {},
+            username: "",
+        });
     }
 
     addSocketToRoom(socket) {
+        if (GameRoom.socketIdToRoom[socket.id]) {
+            return socket.emit("error", { message: "You are already in a room" });
+        }
+        const isPlayer1 = this.player1.id == socket.id;
+        const isPlayer2 = this.player2.id == socket.id;
         let asPlayerType = "";
-        if (!this.player1.id) {
+        if (!this.player1.id || isPlayer1) {
             this.player1 = socket;
             asPlayerType = "player1";
-        } else if (!this.player2.id) {
+            this.players += 1;
+        } else if (!this.player2.id || isPlayer2) {
             this.player2 = socket;
             asPlayerType = "player2";
+            this.players += 1;
         } else {
             this.spectators[socket.id] = socket;
             asPlayerType = "spectator";
@@ -574,6 +644,17 @@ class GameRoom {
             player1: this.player1.id,
             player2: this.player2.id,
             spectators: Object.keys(this.spectators),
+        });
+        // characterSelected
+        io.to(this.roomName).emit("characterSelected", {
+            isPlayer1: true,
+            character: this.player1.character,
+            username: socketNames[this.player1],
+        });
+        io.to(this.roomName).emit("characterSelected", {
+            isPlayer1: false,
+            character: this.player2.character,
+            username: socketNames[this.player2],
         });
     }
 }
