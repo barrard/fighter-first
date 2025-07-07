@@ -1,4 +1,4 @@
-import Characters from "../../react-fighter/src/gameConfig/Characters.js";
+import Characters from "../gameConfig/Characters.js";
 
 export default {
     verifyCharacter: (id) => {

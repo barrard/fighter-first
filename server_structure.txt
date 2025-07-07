@@ -1,0 +1,26 @@
+/home/dave/code/fighter-first
+├── classes
+│   └── GameRoom.js
+├── controllers
+│   └── Characters.js
+├── package.json
+├── package-lock.json
+├── public
+│   ├── index.html
+│   └── js
+│       ├── Canvas.js
+│       ├── Characters
+│       │   ├── BasePlayer.js
+│       │   └── Basic.js
+│       ├── contants.js
+│       ├── Draw.js
+│       ├── GameLoop.js
+│       ├── InputBatchHandler.js
+│       └── LatencyMonitor.js
+├── README.md
+├── routes
+│   └── users.js
+├── server.js
+└── server_structure.txt
+
+6 directories, 17 files
