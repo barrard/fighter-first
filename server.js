@@ -6,7 +6,8 @@ import path from "path";
 import cors from "cors";
 import CharacterController from "./controllers/Characters.js";
 import userRoutes from "./routes/users.js";
-
+import { performance } from "perf_hooks";
+import GameRoom from "./classes/GameRoom.js";
 const app = express();
 const server = http.createServer(app);
 var corsOptions = {
@@ -72,11 +73,16 @@ let serverTick = 0;
 let dataSent = 0;
 let lastServerTick = 0;
 
+// For performance monitoring
+let loopTimes = [];
+const perfWindow = 60; // ~1 second, used for calculating rolling average
+
 // Game state
 const gameState = {
     players: new Map(),
     timestamp: Date.now(),
 };
+const socketNames = {};
 
 function handlePlayerInput(player) {
     const nextInput = player.batchInput.shift();
@@ -180,6 +186,7 @@ function addInputBatchToPlayer(batchInput, socket) {
 
 // Game loop for authoritative movement
 setInterval(() => {
+    const startTime = performance.now();
     serverTick++;
     // let updated = false;
 
@@ -287,8 +294,19 @@ setInterval(() => {
         io.emit("gameState", { players });
     }
     // }
+    const endTime = performance.now();
+    const loopDuration = endTime - startTime;
+    loopTimes.push(loopDuration);
 
-    // }
+    if (loopTimes.length > perfWindow) {
+        loopTimes.shift(); // Keep the array at a fixed size for a rolling average
+    }
+
+    // Log average time periodically
+    if (serverTick % perfWindow === 0 && loopTimes.length > 0) {
+        const averageTime = loopTimes.reduce((a, b) => a + b, 0) / loopTimes.length;
+        console.log(`Average loop time (last ${perfWindow} ticks): ${averageTime.toFixed(4)} ms`);
+    }
 }, 1000 / 61); // ~60 fps
 
 // Function to update player facing directions
@@ -326,9 +344,6 @@ function updatePlayerFacingDirections() {
     });
 }
 
-const gameRooms = {};
-const socketNames = {};
-
 function checkForUsername(socket) {
     const cookies = socket.handshake.headers.cookie;
 
@@ -365,16 +380,18 @@ io.on("connection", (socket) => {
     checkForUsername(socket);
 
     console.log("A user connected", socket.id);
+    socket.join("waitingRoom");
 
     socket.on("characterSelected", (selectedChar) => {
         //get the type of socket, player1 player2 or spectator
-        const room = GameRoom.socketIdToRoom[socket.id];
+        const playerId = socket.id;
+        const room = GameRoom.socketIdToRoom[playerId];
         if (!room) {
             socket.emit("error", { message: "You are not in a room" });
             return;
         }
-        const isPlayer1 = room.player1.id == socket.id;
-        const isPlayer2 = room.player2.id == socket.id;
+        const isPlayer1 = room.player1.id == playerId;
+        const isPlayer2 = room.player2.id == playerId;
 
         if (!isPlayer1 && !isPlayer2) {
             socket.emit("error", { message: "You are not a player in this room" });
@@ -386,13 +403,35 @@ io.on("connection", (socket) => {
             return;
         }
 
-        const username = socketNames[socket.id];
+        // const BasicPlayer = new Basic({ socket });
+        // Create a new player
+        const player = {
+            id: playerId,
+            x: 100, // Start position
+            height: 0, // Height above floor (0 = on floor, positive = above floor)
+            color: "#" + Math.floor(Math.random() * 16777215).toString(16),
+            // isMoving: false,
+            movingDirection: null,
+            horizontalVelocity: 0,
+            isJumping: false,
+            verticalVelocity: 0,
+            facing: "right", // Default facing direction
+            batchInput: [],
+            serverTick: serverTick,
+            currentTick: 0,
+            currentFrame: 0,
+        };
+
+        // Add player to game state
+        gameState.players.set(playerId, player);
+
+        const username = socketNames[playerId];
         if (isPlayer1) {
             room.player1.character = character;
-            room.player1.gameState = gameState.players.get(socket.id);
+            room.player1.gameState = gameState.players.get(playerId);
         } else if (isPlayer2) {
             room.player2.character = character;
-            room.player2.gameState = gameState.players.get(socket.id);
+            room.player2.gameState = gameState.players.get(playerId);
         }
 
         io.to(room.roomName).emit("characterSelected", {
@@ -416,7 +455,7 @@ io.on("connection", (socket) => {
     socket.on("verifyRoom", (roomName) => {
         roomName = encodeURIComponent(roomName);
         const inRoom = socket.rooms.has(roomName);
-        const room = gameRooms[roomName];
+        const room = GameRoom.gameRooms[roomName];
 
         //will be player1, player2, or spectator
         const inRoomAs = room?.inRoomAs(socket);
@@ -432,12 +471,11 @@ io.on("connection", (socket) => {
         }
         console.log(`verifyRoom: Socket ${socket.id} is in room ${roomName} as ${inRoomAs}`);
     });
-    socket.join("waitingRoom");
 
     socket.on("joinRoom", ({ roomName }) => {
         roomName = encodeURIComponent(roomName);
         console.log("joinRoom", socket.id, roomName);
-        const room = gameRooms[roomName];
+        const room = GameRoom.gameRooms[roomName];
         if (!room) {
             socket.emit("error", { message: "Room not found" });
             return;
@@ -447,21 +485,23 @@ io.on("connection", (socket) => {
         // socket.emit("joinGameRoom", { username, roomName });
         socket.broadcast.emit(
             "roomsList",
-            Object.values(gameRooms).map((gr) => gr.toDto())
+            Object.values(GameRoom.gameRooms).map((gr) => gr.toDto())
         );
     });
 
     socket.on("leaveRoom", (roomName) => {
         console.log("leaveRoom", socket.id, roomName);
-        const room = gameRooms[roomName];
+        const room = GameRoom.gameRooms[roomName];
         if (!room) {
             socket.emit("error", { message: "Room not found" });
             return;
         }
         room.removeSocketFromRoom(socket);
+        gameState.players.delete(playerId);
+
         socket.broadcast.emit(
             "roomsList",
-            Object.values(gameRooms).map((gr) => gr.toDto())
+            Object.values(GameRoom.gameRooms).map((gr) => gr.toDto())
         );
     });
 
@@ -469,28 +509,28 @@ io.on("connection", (socket) => {
         console.log("createRoom", roomName);
         roomName = encodeURIComponent(roomName);
 
-        if (gameRooms[roomName]) {
+        if (GameRoom.gameRooms[roomName]) {
             socket.emit("error", { message: "Room name already exists" });
             return;
         }
-        const newRoom = new GameRoom({ owner: socket.id, roomName });
-        gameRooms[roomName] = newRoom;
+        const newRoom = new GameRoom({ io, gameState, socketNames, ownerId: socket.id, roomName });
+        GameRoom.gameRooms[roomName] = newRoom;
         newRoom.addSocketToRoom(socket);
         socket.broadcast.emit(
             "roomsList",
-            Object.values(gameRooms).map((gr) => gr.toDto())
+            Object.values(GameRoom.gameRooms).map((gr) => gr.toDto())
         );
     });
 
     socket.on("getRooms", () => {
         socket.emit(
             "roomsList",
-            Object.values(gameRooms).map((gr) => gr.toDto())
+            Object.values(GameRoom.gameRooms).map((gr) => gr.toDto())
         );
     });
     socket.emit(
         "roomsList",
-        Object.values(gameRooms).map((gr) => gr.toDto())
+        Object.values(GameRoom.gameRooms).map((gr) => gr.toDto())
     );
     socket.on("ping", (data) => {
         // Echo back the client's timestamp
@@ -499,41 +539,14 @@ io.on("connection", (socket) => {
             serverTimestamp: Date.now(),
         });
     });
+    //I dont think this will ever be used....
+    // const playerId = socket.id;
 
-    // const BasicPlayer = new Basic({ socket });
-    // Create a new player
-    const playerId = socket.id;
-    const player = {
-        id: playerId,
-        x: 100, // Start position
-        height: 0, // Height above floor (0 = on floor, positive = above floor)
-        color: "#" + Math.floor(Math.random() * 16777215).toString(16),
-        // isMoving: false,
-        movingDirection: null,
-        horizontalVelocity: 0,
-        isJumping: false,
-        verticalVelocity: 0,
-        facing: "right", // Default facing direction
-        batchInput: [],
-        serverTick: serverTick,
-        currentTick: 0,
-        currentFrame: 0,
-    };
-
-    // Add player to game state
-    gameState.players.set(playerId, player);
-
-    // Send initial state to the new player
-    // socket.emit("init", {
-    //     playerId: playerId,
-    //     players: Array.from(gameState.players.values()),
-    // });
-
-    const room = GameRoom.socketIdToRoom[playerId];
-    if (room) {
-        // Broadcast new player to all other players
-        io.to(room.roomName).emit("playerJoined", player);
-    }
+    // const room = GameRoom.socketIdToRoom[playerId];
+    // if (room) {
+    //     // Broadcast new player to all other players
+    //     io.to(room.roomName).emit("playerJoined", player);
+    // }
 
     socket.on("playerInputBatch", (data) => addInputBatchToPlayer(data, socket));
 
@@ -557,104 +570,3 @@ io.on("connection", (socket) => {
 server.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
 });
-
-class GameRoom {
-    static socketIdToRoom = {};
-
-    constructor({ owner, roomName }) {
-        this.roomName = roomName;
-        this.owner = owner;
-        this.spectators = {};
-        this.player1 = owner;
-        this.player2 = {};
-        this.players = 0;
-    }
-
-    toDto() {
-        return {
-            roomName: decodeURIComponent(this.roomName),
-            owner: this.owner,
-            players: this.players,
-            player1: this.player1.id,
-            player1Character: this.player1.character,
-            player2: this.player2.id,
-            player2Character: this.player2.character,
-            spectators: Object.keys(this.spectators),
-        };
-    }
-
-    inRoomAs(socket) {
-        if (this.player1.id == socket?.id) return "player1";
-        if (this.player2.id == socket?.id) return "player2";
-        else if (this.spectators[socket?.id]) return "spectator";
-        return "unknown";
-    }
-    removeSocketFromRoom(socket) {
-        socket.leave(this.roomName);
-        GameRoom.socketIdToRoom[socket.id] = null;
-        const game = gameRooms[this.roomName];
-        let isPlayer1 = false;
-        if (game.inRoomAs(socket) == "player1") {
-            this.player1 = {};
-            this.players -= 1;
-            isPlayer1 = true;
-        } else if (game.inRoomAs(socket) == "player2") {
-            this.player2 = {};
-            this.players -= 1;
-            isPlayer1 = false;
-        } else if (game.inRoomAs(socket) == "spectator") {
-            delete this.spectators[socket.id];
-            return; //don't both running the emit
-        }
-
-        io.to(this.roomName).emit("characterSelected", {
-            isPlayer1,
-            character: {},
-            username: "",
-        });
-    }
-
-    addSocketToRoom(socket) {
-        if (GameRoom.socketIdToRoom[socket.id]) {
-            return socket.emit("error", { message: "You are already in a room" });
-        }
-        const isPlayer1 = this.player1.id == socket.id;
-        const isPlayer2 = this.player2.id == socket.id;
-        let asPlayerType = "";
-        if (!this.player1.id || isPlayer1) {
-            this.player1 = socket;
-            asPlayerType = "player1";
-            this.players += 1;
-        } else if (!this.player2.id || isPlayer2) {
-            this.player2 = socket;
-            asPlayerType = "player2";
-            this.players += 1;
-        } else {
-            this.spectators[socket.id] = socket;
-            asPlayerType = "spectator";
-        }
-
-        GameRoom.socketIdToRoom[socket.id] = this;
-
-        socket.join(this.roomName);
-        console.log(`${socket.id} joined ${this.roomName}`);
-        socket.emit("joinGameRoom", {
-            roomName: this.roomName,
-            asPlayerType,
-            player1: this.player1.id,
-            player2: this.player2.id,
-            spectators: Object.keys(this.spectators),
-        });
-        // characterSelected
-        io.to(this.roomName).emit("characterSelected", {
-            isPlayer1: true,
-            character: this.player1.character,
-            username: socketNames[this.player1],
-        });
-        io.to(this.roomName).emit("characterSelected", {
-            isPlayer1: false,
-            character: this.player2.character,
-            username: socketNames[this.player2],
-        });
-    }
-}
