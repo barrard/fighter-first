@@ -10,8 +10,12 @@ import { performance } from "perf_hooks";
 import GameRoom from "./classes/GameRoom.js";
 const app = express();
 const server = http.createServer(app);
+const allowedOrigins = process.env.CLIENT_ORIGINS
+    ? process.env.CLIENT_ORIGINS.split(",").map((origin) => origin.trim())
+    : ["http://localhost:5173"];
+
 var corsOptions = {
-    origin: "http://localhost:5173",
+    origin: allowedOrigins,
     optionsSuccessStatus: 200, // some legacy browsers (IE11, various SmartTVs) choke on 204
     methods: ["GET", "POST"],
     // allowedHeaders: ["my-custom-header"],
@@ -20,6 +24,13 @@ var corsOptions = {
 
 const io = new Server(server, {
     cors: corsOptions,
+});
+io.engine.on("headers", (headers, req) => {
+    const origin = req.headers.origin;
+    if (origin && allowedOrigins.includes(origin)) {
+        headers["Access-Control-Allow-Origin"] = origin;
+        headers["Access-Control-Allow-Credentials"] = "true";
+    }
 });
 
 const port = process.env.NODE_ENV === "development" ? 3000 : 1548;
@@ -102,11 +113,20 @@ io.on("connection", (socket) => {
             return;
         }
 
+        const {
+            width: characterWidth,
+            height: characterHeight,
+            movementSpeed,
+            jumpVelocity,
+            punchDuration,
+            kickDuration,
+        } = character.stats || {};
+
         const player = {
             id: playerId,
             x: 100,
             height: 0,
-            color: "#" + Math.floor(Math.random() * 16777215).toString(16),
+            color: character.color || "#" + Math.floor(Math.random() * 16777215).toString(16),
             movingDirection: null,
             horizontalVelocity: 0,
             isJumping: false,
@@ -116,6 +136,12 @@ io.on("connection", (socket) => {
             serverTick: 0,
             currentTick: 0,
             currentFrame: 0,
+            characterWidth: characterWidth,
+            characterHeight: characterHeight,
+            movementSpeed,
+            jumpVelocity,
+            punchDuration,
+            kickDuration,
         };
 
         room.gameState.players.set(playerId, player);
@@ -134,6 +160,7 @@ io.on("connection", (socket) => {
             character,
             username,
         });
+        room.broadcastRoomState();
 
         if (room.player1Character && room.player2Character) {
             room.startGame();
@@ -229,6 +256,15 @@ io.on("connection", (socket) => {
     });
 
     socket.on("playerInputBatch", (data) => addInputBatchToPlayer(data, socket));
+
+    socket.on("requestRoomPlayers", () => {
+        const room = GameRoom.socketIdToRoom[socket.id];
+        if (!room) {
+            socket.emit("error", { message: "You are not in a room" });
+            return;
+        }
+        room.broadcastRoomState(socket);
+    });
 
     socket.on("disconnect", () => {
         const playerId = socket.id;

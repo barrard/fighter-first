@@ -1,4 +1,3 @@
-
 import { performance } from "perf_hooks";
 
 const PUNCH_DURATION = 300; // milliseconds
@@ -13,7 +12,7 @@ const LEG_Y_OFFSET = 70; // Position from top of character
 const PLAYER_WIDTH = 50;
 const PLAYER_HEIGHT = 100;
 const MOVEMENT_SPEED = 5; // Pixels per frame
-const MAX_WIDTH = 1920; // Default max width, will be overridden by client window size
+const ARENA_WIDTH = 937;
 const JUMP_VELOCITY = -15;
 const GRAVITY = 0.8;
 const FLOOR_Y = 800; // This should match your client calculation
@@ -23,6 +22,13 @@ const GROUND_FRICTION = 0.2;
 const ONE_SECOND = 1000;
 const FPS_SERVER = 20;
 const SERVER_FPS_TIME = ONE_SECOND / FPS_SERVER;
+
+const getCharacterWidth = (player) => player?.characterWidth; //|| PLAYER_WIDTH;
+const getCharacterHeight = (player) => player?.characterHeight; //|| PLAYER_HEIGHT;
+const getMovementSpeed = (player) => player?.movementSpeed; //|| MOVEMENT_SPEED;
+const getJumpVelocity = (player) => player?.jumpVelocity; //|| JUMP_VELOCITY;
+const getPunchDuration = (player) => player?.punchDuration; //|| PUNCH_DURATION;
+const getKickDuration = (player) => player?.kickDuration; //|| KICK_DURATION;
 
 export default class GameLoopService {
     constructor(io, roomName, gameState) {
@@ -60,6 +66,7 @@ export default class GameLoopService {
         });
 
         const timeSent = Date.now();
+        const timeDiff = timeSent - this.lastTimeSent;
         const tickDiff = this.serverTick - this.lastServerTick;
 
         if (tickDiff == 3) {
@@ -77,7 +84,14 @@ export default class GameLoopService {
                 isPunching: player.isPunching,
                 verticalVelocity: player.verticalVelocity,
                 horizontalVelocity: player.horizontalVelocity,
-                lastProcessedInput: player.lastProcessedInput || 0,
+                characterWidth: getCharacterWidth(player),
+                characterHeight: getCharacterHeight(player),
+                movementSpeed: getMovementSpeed(player),
+                jumpVelocity: getJumpVelocity(player),
+                punchDuration: getPunchDuration(player),
+                kickDuration: getKickDuration(player),
+                arenaWidth: ARENA_WIDTH,
+                lastProcessedInput: player.lastInput || 0,
                 serverTick: player.serverTick,
             }));
             this.io.to(this.roomName).emit("gameState", { players });
@@ -93,7 +107,9 @@ export default class GameLoopService {
 
         if (this.serverTick % this.perfWindow === 0 && this.loopTimes.length > 0) {
             const averageTime = this.loopTimes.reduce((a, b) => a + b, 0) / this.loopTimes.length;
-            console.log(`Room: ${this.roomName} - Average loop time (last ${this.perfWindow} ticks): ${averageTime.toFixed(4)} ms`);
+            console.log(
+                `Room: ${this.roomName} - Average loop time (last ${this.perfWindow} ticks): ${averageTime.toFixed(4)} ms`,
+            );
         }
     }
 
@@ -132,7 +148,7 @@ export default class GameLoopService {
             }
             if (keysPressed.ArrowUp && !player.isJumping) {
                 player.isJumping = true;
-                player.verticalVelocity = JUMP_VELOCITY;
+                player.verticalVelocity = getJumpVelocity(player);
             }
         }
 
@@ -144,17 +160,19 @@ export default class GameLoopService {
         player.serverTick = this.serverTick;
         const onGround = !player.isJumping;
 
+        const speed = getMovementSpeed(player);
         if (player.movingDirection === "ArrowLeft") {
-            player.horizontalVelocity = -MOVEMENT_SPEED;
+            player.horizontalVelocity = -speed;
         } else if (player.movingDirection === "ArrowRight") {
-            player.horizontalVelocity = MOVEMENT_SPEED;
+            player.horizontalVelocity = speed;
         } else {
             player.horizontalVelocity = 0;
         }
 
         if (player.horizontalVelocity !== 0) {
             player.x += player.horizontalVelocity;
-            player.x = Math.max(0, Math.min(937 - PLAYER_WIDTH, player.x));
+            const width = getCharacterWidth(player);
+            player.x = Math.max(0, Math.min(ARENA_WIDTH - width, player.x));
         }
 
         if (player.isJumping) {

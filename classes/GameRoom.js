@@ -18,6 +18,31 @@ export default class GameRoom {
         this.players = 0;
         this.gameLoopService = new GameLoopService(this.io, this.roomName, this.gameState);
     }
+    broadcastRoomState(targetSocket = null) {
+        const payload = {
+            player1: this.player1Id
+                ? {
+                      id: this.player1Id,
+                      username: this.socketNames[this.player1Id],
+                      character: this.player1Character,
+                  }
+                : null,
+            player2: this.player2Id
+                ? {
+                      id: this.player2Id,
+                      username: this.socketNames[this.player2Id],
+                      character: this.player2Character,
+                  }
+                : null,
+        };
+
+        if (targetSocket) {
+            targetSocket.emit("roomPlayersUpdate", payload);
+            return;
+        }
+
+        this.io.to(this.roomName).emit("roomPlayersUpdate", payload);
+    }
 
     startGame() {
         this.gameLoopService.start();
@@ -63,21 +88,27 @@ export default class GameRoom {
             return;
         } else if (asPlayerType === "spectator") {
             delete this.spectators[socket.id];
+            this.broadcastRoomState();
             return;
         }
+        this.broadcastRoomState();
     }
 
     addSocketToRoom(socket) {
         const existingRoom = GameRoom.socketIdToRoom[socket.id];
         if (existingRoom) {
-            const asPlayerType = existingRoom.inRoomAs(socket);
-            return socket.emit("joinGameRoom", {
-                roomName: this.roomName,
-                asPlayerType,
-                player1: this.player1Id,
-                player2: this.player2Id,
-                spectators: Object.keys(this.spectators),
-            });
+            if (existingRoom.roomName !== this.roomName) {
+                existingRoom.removeSocketFromRoom(socket);
+            } else {
+                const asPlayerType = existingRoom.inRoomAs(socket);
+                return socket.emit("joinGameRoom", {
+                    roomName: this.roomName,
+                    asPlayerType,
+                    player1: this.player1Id,
+                    player2: this.player2Id,
+                    spectators: Object.keys(this.spectators),
+                });
+            }
         }
 
         let asPlayerType = "";
@@ -106,6 +137,8 @@ export default class GameRoom {
             player2: this.player2Id,
             spectators: Object.keys(this.spectators),
         });
+
+        this.broadcastRoomState();
 
         // characterSelected
         if (this.player1Character) {
