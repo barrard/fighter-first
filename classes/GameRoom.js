@@ -155,5 +155,11 @@ export default class GameRoom {
                 username: this.socketNames[this.player2Id],
             });
         }
+
+        // If spectator joins an ongoing game, send them the current game state
+        if (asPlayerType === "spectator" && this.player1Character && this.player2Character) {
+            const players = Array.from(this.gameState.players.values());
+            socket.emit("initServerPlayers", { players });
+        }
     }
 }
