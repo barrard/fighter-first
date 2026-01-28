@@ -120,6 +120,16 @@ io.on("connection", (socket) => {
             jumpVelocity,
             punchDuration,
             kickDuration,
+            // Combat stats
+            health,
+            punchDamage,
+            kickDamage,
+            punchKnockback,
+            kickKnockback,
+            punchActiveStart,
+            punchActiveEnd,
+            kickActiveStart,
+            kickActiveEnd,
         } = character.stats || {};
 
         const player = {
@@ -142,6 +152,20 @@ io.on("connection", (socket) => {
             jumpVelocity,
             punchDuration,
             kickDuration,
+            // Combat state
+            health: health || 100,
+            maxHealth: health || 100,
+            punchDamage: punchDamage || 10,
+            kickDamage: kickDamage || 15,
+            punchKnockback: punchKnockback || 8,
+            kickKnockback: kickKnockback || 12,
+            punchActiveStart: punchActiveStart || 3,
+            punchActiveEnd: punchActiveEnd || 8,
+            kickActiveStart: kickActiveStart || 5,
+            kickActiveEnd: kickActiveEnd || 12,
+            attackState: null,
+            hitStun: 0,
+            knockbackVelocity: 0,
         };
 
         room.gameState.players.set(playerId, player);

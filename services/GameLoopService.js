@@ -23,12 +23,24 @@ const ONE_SECOND = 1000;
 const FPS_SERVER = 20;
 const SERVER_FPS_TIME = ONE_SECOND / FPS_SERVER;
 
-const getCharacterWidth = (player) => player?.characterWidth; //|| PLAYER_WIDTH;
-const getCharacterHeight = (player) => player?.characterHeight; //|| PLAYER_HEIGHT;
-const getMovementSpeed = (player) => player?.movementSpeed; //|| MOVEMENT_SPEED;
-const getJumpVelocity = (player) => player?.jumpVelocity; //|| JUMP_VELOCITY;
-const getPunchDuration = (player) => player?.punchDuration; //|| PUNCH_DURATION;
-const getKickDuration = (player) => player?.kickDuration; //|| KICK_DURATION;
+const getCharacterWidth = (player) => player?.characterWidth || PLAYER_WIDTH;
+const getCharacterHeight = (player) => player?.characterHeight || PLAYER_HEIGHT;
+const getMovementSpeed = (player) => player?.movementSpeed || MOVEMENT_SPEED;
+const getJumpVelocity = (player) => player?.jumpVelocity || JUMP_VELOCITY;
+const getPunchDuration = (player) => player?.punchDuration || PUNCH_DURATION;
+const getKickDuration = (player) => player?.kickDuration || KICK_DURATION;
+
+// Combat stat getters
+const getPunchDamage = (player) => player?.punchDamage || 10;
+const getKickDamage = (player) => player?.kickDamage || 15;
+const getPunchKnockback = (player) => player?.punchKnockback || 8;
+const getKickKnockback = (player) => player?.kickKnockback || 12;
+const getPunchActiveStart = (player) => player?.punchActiveStart || 3;
+const getPunchActiveEnd = (player) => player?.punchActiveEnd || 8;
+const getKickActiveStart = (player) => player?.kickActiveStart || 5;
+const getKickActiveEnd = (player) => player?.kickActiveEnd || 12;
+
+const HIT_STUN_FRAMES = 10;
 
 export default class GameLoopService {
     constructor(io, roomName, gameState) {
@@ -65,6 +77,9 @@ export default class GameLoopService {
             this.updatePlayerState(player);
         });
 
+        // Process combat after all players have updated
+        this.processCombat();
+
         const timeSent = Date.now();
         const timeDiff = timeSent - this.lastTimeSent;
         const tickDiff = this.serverTick - this.lastServerTick;
@@ -93,6 +108,10 @@ export default class GameLoopService {
                 arenaWidth: ARENA_WIDTH,
                 lastProcessedInput: player.lastInput || 0,
                 serverTick: player.serverTick,
+                // Combat state
+                health: player.health,
+                maxHealth: player.maxHealth,
+                hitStun: player.hitStun || 0,
             }));
             this.io.to(this.roomName).emit("gameState", { players });
         }
@@ -152,12 +171,59 @@ export default class GameLoopService {
             }
         }
 
-        player.isPunching = keysPressed.KeyP && !player.isPunching;
-        player.isKicking = keysPressed.KeyK && !player.isKicking;
+        // Handle punch input - only start if not already attacking
+        if (keysPressed.KeyP && !player.isPunching && !player.isKicking && !player.attackState) {
+            player.isPunching = true;
+            player.attackState = {
+                type: "punch",
+                startTick: this.serverTick,
+                hasHit: false,
+            };
+        }
+
+        // Handle kick input - only start if not already attacking
+        if (keysPressed.KeyK && !player.isKicking && !player.isPunching && !player.attackState) {
+            player.isKicking = true;
+            player.attackState = {
+                type: "kick",
+                startTick: this.serverTick,
+                hasHit: false,
+            };
+        }
     }
 
     updatePlayerState(player) {
         player.serverTick = this.serverTick;
+        const width = getCharacterWidth(player);
+
+        // Handle hit stun - prevents movement/actions
+        if (player.hitStun > 0) {
+            player.hitStun--;
+
+            // Apply knockback during hit stun
+            if (player.knockbackVelocity !== 0) {
+                player.x += player.knockbackVelocity;
+                player.knockbackVelocity *= 0.8; // Decay knockback
+
+                // Clamp to arena bounds
+                player.x = Math.max(0, Math.min(ARENA_WIDTH - width, player.x));
+            }
+
+            // Still apply gravity during hit stun
+            if (player.isJumping) {
+                player.height -= player.verticalVelocity;
+                player.verticalVelocity += GRAVITY;
+
+                if (player.height <= 0) {
+                    player.height = 0;
+                    player.verticalVelocity = 0;
+                    player.isJumping = false;
+                }
+            }
+
+            return; // Skip normal movement during hit stun
+        }
+
         const onGround = !player.isJumping;
 
         const speed = getMovementSpeed(player);
@@ -171,7 +237,6 @@ export default class GameLoopService {
 
         if (player.horizontalVelocity !== 0) {
             player.x += player.horizontalVelocity;
-            const width = getCharacterWidth(player);
             player.x = Math.max(0, Math.min(ARENA_WIDTH - width, player.x));
         }
 
@@ -185,6 +250,163 @@ export default class GameLoopService {
                 player.isJumping = false;
             }
         }
+
+        // Handle attack duration expiry
+        if (player.attackState) {
+            const attackAge = this.serverTick - player.attackState.startTick;
+            const durationFrames = player.attackState.type === "punch"
+                ? Math.ceil(getPunchDuration(player) / (1000 / 60)) // Convert ms to frames
+                : Math.ceil(getKickDuration(player) / (1000 / 60));
+
+            if (attackAge >= durationFrames) {
+                player.isPunching = false;
+                player.isKicking = false;
+                player.attackState = null;
+            }
+        }
+    }
+
+    processCombat() {
+        const players = Array.from(this.gameState.players.values());
+        if (players.length < 2) return;
+
+        const hits = [];
+
+        // Check each player's attack against all other players
+        for (const attacker of players) {
+            if (!this.isAttackActive(attacker)) continue;
+            if (attacker.attackState?.hasHit) continue; // Already hit this attack
+
+            for (const target of players) {
+                if (attacker.id === target.id) continue;
+                if (target.hitStun > 0) continue; // Can't hit stunned players
+
+                const hitResult = this.checkAttackCollision(attacker, target);
+                if (hitResult.hit) {
+                    hits.push({
+                        attacker,
+                        target,
+                        ...hitResult,
+                    });
+                }
+            }
+        }
+
+        // Process all hits (handles trades - both players hitting each other)
+        for (const hit of hits) {
+            this.applyHit(hit);
+        }
+
+        // Emit hit events
+        if (hits.length > 0) {
+            this.emitHitEvents(hits);
+        }
+    }
+
+    isAttackActive(player) {
+        if (!player.attackState?.type) return false;
+
+        const attackAge = this.serverTick - player.attackState.startTick;
+        const activeStart = player.attackState.type === "punch"
+            ? getPunchActiveStart(player)
+            : getKickActiveStart(player);
+        const activeEnd = player.attackState.type === "punch"
+            ? getPunchActiveEnd(player)
+            : getKickActiveEnd(player);
+
+        return attackAge >= activeStart && attackAge <= activeEnd;
+    }
+
+    checkAttackCollision(attacker, target) {
+        const attackHitbox = this.getAttackHitbox(attacker);
+        const targetHurtbox = this.getPlayerHurtbox(target);
+
+        if (this.boxesOverlap(attackHitbox, targetHurtbox)) {
+            const isPunch = attacker.attackState.type === "punch";
+            const damage = isPunch ? getPunchDamage(attacker) : getKickDamage(attacker);
+            const knockback = isPunch ? getPunchKnockback(attacker) : getKickKnockback(attacker);
+
+            return {
+                hit: true,
+                type: attacker.attackState.type,
+                damage,
+                knockback: knockback * (attacker.facing === "right" ? 1 : -1),
+            };
+        }
+
+        return { hit: false };
+    }
+
+    getAttackHitbox(player) {
+        const width = getCharacterWidth(player);
+        const height = getCharacterHeight(player);
+        const isPunch = player.attackState.type === "punch";
+
+        // Hitbox extends from the player in the facing direction
+        const hitboxWidth = isPunch ? ARM_WIDTH : LEG_WIDTH;
+        const hitboxHeight = isPunch ? ARM_HEIGHT : LEG_HEIGHT;
+        const yOffset = isPunch ? ARM_Y_OFFSET : LEG_Y_OFFSET;
+
+        return {
+            x: player.facing === "right"
+                ? player.x + width
+                : player.x - hitboxWidth,
+            y: player.height + yOffset, // height above ground + offset from top
+            width: hitboxWidth,
+            height: hitboxHeight,
+        };
+    }
+
+    getPlayerHurtbox(player) {
+        return {
+            x: player.x,
+            y: player.height, // Height above ground
+            width: getCharacterWidth(player),
+            height: getCharacterHeight(player),
+        };
+    }
+
+    boxesOverlap(box1, box2) {
+        return (
+            box1.x < box2.x + box2.width &&
+            box1.x + box1.width > box2.x &&
+            box1.y < box2.y + box2.height &&
+            box1.y + box1.height > box2.y
+        );
+    }
+
+    applyHit(hit) {
+        const { attacker, target, damage, knockback, type } = hit;
+
+        // Mark attack as having hit (prevents multi-hit)
+        attacker.attackState.hasHit = true;
+
+        // Apply damage
+        target.health = Math.max(0, target.health - damage);
+
+        // Apply hit stun
+        target.hitStun = HIT_STUN_FRAMES;
+
+        // Apply knockback
+        target.knockbackVelocity = knockback;
+
+        console.log(
+            `[Combat] ${attacker.id} hit ${target.id} with ${type} for ${damage} damage. Target health: ${target.health}`
+        );
+    }
+
+    emitHitEvents(hits) {
+        const events = hits.map((hit) => ({
+            attackerId: hit.attacker.id,
+            targetId: hit.target.id,
+            attackType: hit.type,
+            damage: hit.damage,
+            targetNewHealth: hit.target.health,
+            knockback: hit.knockback,
+            tick: this.serverTick,
+        }));
+
+        this.io.to(this.roomName).emit("combatHits", events);
     }
 
     updatePlayerFacingDirections() {
