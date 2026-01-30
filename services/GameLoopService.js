@@ -1,4 +1,5 @@
 import { performance } from "perf_hooks";
+import { encodeGameStatePayload } from "../../shared/stateCodec.js";
 
 const PUNCH_DURATION = 300; // milliseconds
 const KICK_DURATION = 400; // milliseconds
@@ -42,6 +43,11 @@ const getKickActiveStart = (player) => player?.kickActiveStart || 5;
 const getKickActiveEnd = (player) => player?.kickActiveEnd || 12;
 
 const HIT_STUN_FRAMES = 10;
+const roundTo = (value, precision = 2) => {
+    if (typeof value !== "number" || Number.isNaN(value)) return 0;
+    const factor = Math.pow(10, precision);
+    return Math.round(value * factor) / factor;
+};
 
 export default class GameLoopService {
     constructor(io, roomName, gameState) {
@@ -107,30 +113,21 @@ export default class GameLoopService {
                 const simulationTick = this.serverTick - SIMULATION_DELAY;
                 const players = Array.from(this.gameState.players.values()).map((player) => ({
                     id: player.id,
-                    x: player.x,
+                    x: roundTo(player.x),
                     lastProcessedTick: player.lastProcessedTick,
-                    simulationTick: simulationTick,
-                    height: player.height,
+                    height: roundTo(player.height),
                     facing: player.facing,
-                    isJumping: player.isJumping,
-                    isKicking: player.isKicking,
-                    isPunching: player.isPunching,
-                    verticalVelocity: player.verticalVelocity,
-                    horizontalVelocity: player.horizontalVelocity,
-                    characterWidth: getCharacterWidth(player),
-                    characterHeight: getCharacterHeight(player),
-                    movementSpeed: getMovementSpeed(player),
-                    jumpVelocity: getJumpVelocity(player),
-                    punchDuration: getPunchDuration(player),
-                    kickDuration: getKickDuration(player),
-                    arenaWidth: ARENA_WIDTH,
+                    isJumping: Boolean(player.isJumping),
+                    isKicking: Boolean(player.isKicking),
+                    isPunching: Boolean(player.isPunching),
+                    verticalVelocity: roundTo(player.verticalVelocity),
+                    horizontalVelocity: roundTo(player.horizontalVelocity),
                     serverTick: player.serverTick,
-                    // Combat state
                     health: player.health,
-                    maxHealth: player.maxHealth,
                     hitStun: player.hitStun || 0,
                 }));
-                this.io.to(this.roomName).emit("gameState", { players });
+                const payload = encodeGameStatePayload({ simulationTick, players });
+                this.io.to(this.roomName).emit("gs", payload);
             }
         }
 

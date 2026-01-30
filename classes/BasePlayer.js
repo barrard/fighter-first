@@ -339,7 +339,7 @@ class BasePlayer {
     sendBatch() {
         // Only send if there's been a state change
         const data = {
-            keysPressed: [...this.gameLoop.inputsOnDeck],
+            b: [...this.gameLoop.inputsOnDeck],
             currentTick: this.currentTick,
         };
         this.sentInputWithTicks.push(data);
@@ -352,7 +352,7 @@ class BasePlayer {
             "sendBatch.currentTick": this.currentTick,
         });
         // Send the current state to the server
-        this.socket.emit("playerInputBatch", data);
+        this.socket.emit("ib", data);
     }
 
     // Clean up when no longer needed

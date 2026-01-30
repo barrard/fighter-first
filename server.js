@@ -8,6 +8,7 @@ import CharacterController from "./controllers/Characters.js";
 import userRoutes from "./routes/users.js";
 import { performance } from "perf_hooks";
 import GameRoom from "./classes/GameRoom.js";
+import { decodeInputMask } from "../shared/inputFlags.js";
 const app = express();
 const server = http.createServer(app);
 const allowedOrigins = process.env.CLIENT_ORIGINS
@@ -48,17 +49,45 @@ app.get("/api/characters", (req, res) => {
 
 const socketNames = {};
 
+function decodeInputFrame(rawFrame) {
+    if (!rawFrame) return null;
+
+    // Old structure already has booleans
+    if (
+        typeof rawFrame.ArrowLeft === "boolean" ||
+        typeof rawFrame.ArrowRight === "boolean"
+    ) {
+        return rawFrame;
+    }
+
+    const mask = Number(rawFrame.k ?? rawFrame.mask ?? 0);
+    const serverTick = rawFrame.t ?? rawFrame.serverTick;
+    const frame = rawFrame.f ?? rawFrame.frame ?? null;
+
+    if (serverTick === undefined || serverTick === null) {
+        return null;
+    }
+
+    return {
+        ...decodeInputMask(mask),
+        serverTick,
+        frame,
+    };
+}
+
 function addInputBatchToPlayer(batchInput, socket) {
     const playerId = socket.id;
     const room = GameRoom.socketIdToRoom[playerId];
     if (!room) return;
     const player = room.gameState.players.get(playerId);
     if (!player) return;
+    const frames = batchInput?.b ?? batchInput?.keysPressed;
+    if (!Array.isArray(frames) || frames.length === 0) return;
     // Decompose batch and store each frame by its serverTick
-    for (const frame of batchInput.keysPressed) {
-        if (frame.serverTick !== undefined && frame.serverTick !== null) {
-            player.inputBuffer[frame.serverTick] = frame;
-        }
+    for (const frame of frames) {
+        const decodedFrame = decodeInputFrame(frame);
+        if (!decodedFrame?.serverTick) continue;
+        player.inputBuffer[decodedFrame.serverTick] = decodedFrame;
     }
     // Uncomment for input debugging:
     // const currentServerTick = room.gameLoopService.serverTick;
@@ -278,14 +307,20 @@ io.on("connection", (socket) => {
         "roomsList",
         Object.values(GameRoom.gameRooms).map((gr) => gr.toDto())
     );
-    socket.on("ping", (data) => {
-        socket.emit("pong", {
-            clientTimestamp: data.clientTimestamp,
-            serverTimestamp: Date.now(),
-        });
+    socket.on("ping", (data = {}) => {
+        const clientTimestamp = data.ct ?? data.clientTimestamp ?? Date.now();
+        const serverTimestamp = Date.now();
+        const payload = { ct: clientTimestamp, st: serverTimestamp };
+        if ("clientTimestamp" in data) {
+            payload.clientTimestamp = clientTimestamp;
+            payload.serverTimestamp = serverTimestamp;
+        }
+        socket.emit("pong", payload);
     });
 
-    socket.on("playerInputBatch", (data) => addInputBatchToPlayer(data, socket));
+    const handleInputBatch = (data) => addInputBatchToPlayer(data, socket);
+    socket.on("playerInputBatch", handleInputBatch);
+    socket.on("ib", handleInputBatch);
 
     socket.on("requestRoomPlayers", () => {
         const room = GameRoom.socketIdToRoom[socket.id];
