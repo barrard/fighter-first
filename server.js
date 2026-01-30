@@ -48,34 +48,22 @@ app.get("/api/characters", (req, res) => {
 
 const socketNames = {};
 
-let _batchLogCount = 0;
 function addInputBatchToPlayer(batchInput, socket) {
     const playerId = socket.id;
     const room = GameRoom.socketIdToRoom[playerId];
-    if (!room) {
-        if (_batchLogCount < 5) console.log(`[INPUT DEBUG] No room for socket ${playerId}`);
-        return;
-    }
+    if (!room) return;
     const player = room.gameState.players.get(playerId);
-    if (!player) {
-        if (_batchLogCount < 5) console.log(`[INPUT DEBUG] No player for socket ${playerId}`);
-        return;
-    }
-    const currentServerTick = room.gameLoopService.serverTick;
+    if (!player) return;
     // Decompose batch and store each frame by its serverTick
-    let storedCount = 0;
     for (const frame of batchInput.keysPressed) {
         if (frame.serverTick !== undefined && frame.serverTick !== null) {
             player.inputBuffer[frame.serverTick] = frame;
-            storedCount++;
         }
     }
-    if (_batchLogCount < 20) {
-        const ticks = batchInput.keysPressed.map(f => f.serverTick);
-        const hasMovement = batchInput.keysPressed.some(f => f.ArrowLeft || f.ArrowRight || f.ArrowUp);
-        console.log(`[INPUT DEBUG] Batch received: ${storedCount} frames, clientTicks=[${ticks}], serverTick=${currentServerTick}, simTick=${currentServerTick - 6}, hasMovement=${hasMovement}, bufferSize=${Object.keys(player.inputBuffer).length}`);
-        _batchLogCount++;
-    }
+    // Uncomment for input debugging:
+    // const currentServerTick = room.gameLoopService.serverTick;
+    // const ticks = batchInput.keysPressed.map(f => f.serverTick);
+    // console.log(`[INPUT DEBUG] clientTicks=[${ticks}], serverTick=${currentServerTick}, simTick=${currentServerTick - 6}, bufferSize=${Object.keys(player.inputBuffer).length}`);
 }
 
 function checkForUsername(socket) {

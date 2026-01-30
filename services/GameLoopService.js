@@ -154,12 +154,12 @@ export default class GameLoopService {
         const simulationTick = this.serverTick - SIMULATION_DELAY;
         const input = player.inputBuffer[simulationTick];
 
-        // Debug logging every 60 ticks (once per second)
-        if (this.serverTick % 60 === 0) {
-            const bufferKeys = Object.keys(player.inputBuffer).map(Number).sort((a, b) => a - b);
-            const bufferRange = bufferKeys.length > 0 ? `[${bufferKeys[0]}..${bufferKeys[bufferKeys.length - 1]}]` : '[]';
-            console.log(`[TICK DEBUG] player=${player.id.substring(0, 6)}, serverTick=${this.serverTick}, simTick=${simulationTick}, found=${!!input}, bufferSize=${bufferKeys.length}, bufferRange=${bufferRange}, lastProcessedTick=${player.lastProcessedTick}`);
-        }
+        // Uncomment for tick debugging:
+        // if (this.serverTick % 60 === 0) {
+        //     const bufferKeys = Object.keys(player.inputBuffer).map(Number).sort((a, b) => a - b);
+        //     const bufferRange = bufferKeys.length > 0 ? `[${bufferKeys[0]}..${bufferKeys[bufferKeys.length - 1]}]` : '[]';
+        //     console.log(`[TICK DEBUG] player=${player.id.substring(0, 6)}, serverTick=${this.serverTick}, simTick=${simulationTick}, found=${!!input}, bufferSize=${bufferKeys.length}, bufferRange=${bufferRange}, lastProcessedTick=${player.lastProcessedTick}`);
+        // }
 
         let keysPressed;
         if (input) {
