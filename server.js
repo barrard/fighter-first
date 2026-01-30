@@ -48,16 +48,34 @@ app.get("/api/characters", (req, res) => {
 
 const socketNames = {};
 
+let _batchLogCount = 0;
 function addInputBatchToPlayer(batchInput, socket) {
     const playerId = socket.id;
     const room = GameRoom.socketIdToRoom[playerId];
-    if (!room) return;
+    if (!room) {
+        if (_batchLogCount < 5) console.log(`[INPUT DEBUG] No room for socket ${playerId}`);
+        return;
+    }
     const player = room.gameState.players.get(playerId);
-    if (!player) return;
-    player.batchInput = [
-        ...player.batchInput,
-        ...batchInput.keysPressed.map((keysPressed) => ({ keysPressed, currentTick: batchInput.currentTick })),
-    ];
+    if (!player) {
+        if (_batchLogCount < 5) console.log(`[INPUT DEBUG] No player for socket ${playerId}`);
+        return;
+    }
+    const currentServerTick = room.gameLoopService.serverTick;
+    // Decompose batch and store each frame by its serverTick
+    let storedCount = 0;
+    for (const frame of batchInput.keysPressed) {
+        if (frame.serverTick !== undefined && frame.serverTick !== null) {
+            player.inputBuffer[frame.serverTick] = frame;
+            storedCount++;
+        }
+    }
+    if (_batchLogCount < 20) {
+        const ticks = batchInput.keysPressed.map(f => f.serverTick);
+        const hasMovement = batchInput.keysPressed.some(f => f.ArrowLeft || f.ArrowRight || f.ArrowUp);
+        console.log(`[INPUT DEBUG] Batch received: ${storedCount} frames, clientTicks=[${ticks}], serverTick=${currentServerTick}, simTick=${currentServerTick - 6}, hasMovement=${hasMovement}, bufferSize=${Object.keys(player.inputBuffer).length}`);
+        _batchLogCount++;
+    }
 }
 
 function checkForUsername(socket) {
@@ -142,9 +160,9 @@ io.on("connection", (socket) => {
             isJumping: false,
             verticalVelocity: 0,
             facing: "right",
-            batchInput: [],
+            inputBuffer: {},
             serverTick: 0,
-            currentTick: 0,
+            lastProcessedTick: 0,
             currentFrame: 0,
             characterWidth: characterWidth,
             characterHeight: characterHeight,

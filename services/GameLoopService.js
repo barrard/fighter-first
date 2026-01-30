@@ -12,16 +12,17 @@ const LEG_Y_OFFSET = 70; // Position from top of character
 const PLAYER_WIDTH = 50;
 const PLAYER_HEIGHT = 100;
 const MOVEMENT_SPEED = 5; // Pixels per frame
-const ARENA_WIDTH = 937;
+const ARENA_WIDTH = 1024;
 const JUMP_VELOCITY = -15;
 const GRAVITY = 0.8;
-const FLOOR_Y = 800; // This should match your client calculation
+const FLOOR_Y = 536; // CANVAS_HEIGHT(576) - FLOOR_HEIGHT(40)
 const FLOOR_HEIGHT = 40; // or some other value
 const AIR_RESISTANCE = 0.02;
 const GROUND_FRICTION = 0.2;
 const ONE_SECOND = 1000;
-const FPS_SERVER = 20;
-const SERVER_FPS_TIME = ONE_SECOND / FPS_SERVER;
+const TICK_RATE = 60;
+const SIMULATION_DELAY = 6;
+const BROADCAST_INTERVAL = 3;
 
 const getCharacterWidth = (player) => player?.characterWidth || PLAYER_WIDTH;
 const getCharacterHeight = (player) => player?.characterHeight || PLAYER_HEIGHT;
@@ -57,9 +58,19 @@ export default class GameLoopService {
     }
 
     start() {
+        this.matchStartTime = performance.now();
         this.gameLoopInterval = setInterval(() => {
             this.tick();
-        }, 1000 / 61); // ~60 fps
+        }, 1000 / TICK_RATE); // 60 fps
+    }
+
+    getMatchStartInfo() {
+        return {
+            serverTick: this.serverTick,
+            serverTimeMs: performance.now(),
+            tickRate: TICK_RATE,
+            matchStartTick: this.serverTick + SIMULATION_DELAY,
+        };
     }
 
     stop() {
@@ -68,52 +79,59 @@ export default class GameLoopService {
 
     tick() {
         const startTime = performance.now();
-        this.serverTick++;
+        // Derive target tick from wall-clock time so it stays in sync with clients
+        const targetTick = Math.floor((startTime - this.matchStartTime) * TICK_RATE / 1000);
 
-        this.updatePlayerFacingDirections();
+        if (targetTick <= this.serverTick) return; // No new ticks to process
 
-        this.gameState.players.forEach((player) => {
-            this.handlePlayerInput(player);
-            this.updatePlayerState(player);
-        });
+        // Process all ticks up to target (catches up if setInterval fires late)
+        while (this.serverTick < targetTick) {
+            this.serverTick++;
 
-        // Process combat after all players have updated
-        this.processCombat();
+            this.updatePlayerFacingDirections();
 
-        const timeSent = Date.now();
-        const timeDiff = timeSent - this.lastTimeSent;
-        const tickDiff = this.serverTick - this.lastServerTick;
+            this.gameState.players.forEach((player) => {
+                this.handlePlayerInput(player);
+                this.updatePlayerState(player);
+            });
 
-        if (tickDiff == 3) {
-            this.dataSent++;
-            this.lastServerTick = this.serverTick;
-            this.lastTimeSent = timeSent;
-            const players = Array.from(this.gameState.players.values()).map((player) => ({
-                id: player.id,
-                x: player.x,
-                currentTick: player.currentTick,
-                height: player.height,
-                facing: player.facing,
-                isJumping: player.isJumping,
-                isKicking: player.isKicking,
-                isPunching: player.isPunching,
-                verticalVelocity: player.verticalVelocity,
-                horizontalVelocity: player.horizontalVelocity,
-                characterWidth: getCharacterWidth(player),
-                characterHeight: getCharacterHeight(player),
-                movementSpeed: getMovementSpeed(player),
-                jumpVelocity: getJumpVelocity(player),
-                punchDuration: getPunchDuration(player),
-                kickDuration: getKickDuration(player),
-                arenaWidth: ARENA_WIDTH,
-                lastProcessedInput: player.lastInput || 0,
-                serverTick: player.serverTick,
-                // Combat state
-                health: player.health,
-                maxHealth: player.maxHealth,
-                hitStun: player.hitStun || 0,
-            }));
-            this.io.to(this.roomName).emit("gameState", { players });
+            // Process combat after all players have updated
+            this.processCombat();
+
+            // Broadcast every BROADCAST_INTERVAL ticks
+            const tickDiff = this.serverTick - this.lastServerTick;
+            if (tickDiff >= BROADCAST_INTERVAL) {
+                this.dataSent++;
+                this.lastServerTick = this.serverTick;
+                this.lastTimeSent = Date.now();
+                const simulationTick = this.serverTick - SIMULATION_DELAY;
+                const players = Array.from(this.gameState.players.values()).map((player) => ({
+                    id: player.id,
+                    x: player.x,
+                    lastProcessedTick: player.lastProcessedTick,
+                    simulationTick: simulationTick,
+                    height: player.height,
+                    facing: player.facing,
+                    isJumping: player.isJumping,
+                    isKicking: player.isKicking,
+                    isPunching: player.isPunching,
+                    verticalVelocity: player.verticalVelocity,
+                    horizontalVelocity: player.horizontalVelocity,
+                    characterWidth: getCharacterWidth(player),
+                    characterHeight: getCharacterHeight(player),
+                    movementSpeed: getMovementSpeed(player),
+                    jumpVelocity: getJumpVelocity(player),
+                    punchDuration: getPunchDuration(player),
+                    kickDuration: getKickDuration(player),
+                    arenaWidth: ARENA_WIDTH,
+                    serverTick: player.serverTick,
+                    // Combat state
+                    health: player.health,
+                    maxHealth: player.maxHealth,
+                    hitStun: player.hitStun || 0,
+                }));
+                this.io.to(this.roomName).emit("gameState", { players });
+            }
         }
 
         const endTime = performance.now();
@@ -133,28 +151,35 @@ export default class GameLoopService {
     }
 
     handlePlayerInput(player) {
-        const nextInput = player.batchInput.shift();
-        if (!nextInput) {
-            player.nextInput = player.lastInput;
-        } else {
-            player.nextInput = nextInput;
-            player.lastInput = nextInput;
+        const simulationTick = this.serverTick - SIMULATION_DELAY;
+        const input = player.inputBuffer[simulationTick];
+
+        // Debug logging every 60 ticks (once per second)
+        if (this.serverTick % 60 === 0) {
+            const bufferKeys = Object.keys(player.inputBuffer).map(Number).sort((a, b) => a - b);
+            const bufferRange = bufferKeys.length > 0 ? `[${bufferKeys[0]}..${bufferKeys[bufferKeys.length - 1]}]` : '[]';
+            console.log(`[TICK DEBUG] player=${player.id.substring(0, 6)}, serverTick=${this.serverTick}, simTick=${simulationTick}, found=${!!input}, bufferSize=${bufferKeys.length}, bufferRange=${bufferRange}, lastProcessedTick=${player.lastProcessedTick}`);
         }
-        if (!player.nextInput) return;
 
-        const { currentTick, keysPressed } = player.nextInput;
-        const onGround = !player.isJumping;
-
-        if (!player.currentTick) {
-            player.currentTick = currentTick;
+        let keysPressed;
+        if (input) {
+            keysPressed = input;
+            player.lastInput = input;
+            player.lastProcessedTick = simulationTick;
+        } else if (player.lastInput) {
+            keysPressed = player.lastInput;
         } else {
-            const tickDiff = currentTick - player.currentTick;
-            if (tickDiff > 1) {
-                player.currentTick = currentTick;
-            } else {
-                player.currentTick = currentTick;
+            return;
+        }
+
+        // Clean up stale buffer entries
+        for (const tick of Object.keys(player.inputBuffer)) {
+            if (Number(tick) < simulationTick) {
+                delete player.inputBuffer[tick];
             }
         }
+
+        const onGround = !player.isJumping;
 
         if (onGround) {
             if (keysPressed.ArrowLeft && !keysPressed.ArrowRight) {
@@ -176,7 +201,7 @@ export default class GameLoopService {
             player.isPunching = true;
             player.attackState = {
                 type: "punch",
-                startTick: this.serverTick,
+                startTick: simulationTick,
                 hasHit: false,
             };
         }
@@ -186,7 +211,7 @@ export default class GameLoopService {
             player.isKicking = true;
             player.attackState = {
                 type: "kick",
-                startTick: this.serverTick,
+                startTick: simulationTick,
                 hasHit: false,
             };
         }
@@ -194,6 +219,7 @@ export default class GameLoopService {
 
     updatePlayerState(player) {
         player.serverTick = this.serverTick;
+        const simulationTick = this.serverTick - SIMULATION_DELAY;
         const width = getCharacterWidth(player);
 
         // Handle hit stun - prevents movement/actions
@@ -253,7 +279,7 @@ export default class GameLoopService {
 
         // Handle attack duration expiry
         if (player.attackState) {
-            const attackAge = this.serverTick - player.attackState.startTick;
+            const attackAge = simulationTick - player.attackState.startTick;
             const durationFrames = player.attackState.type === "punch"
                 ? Math.ceil(getPunchDuration(player) / (1000 / 60)) // Convert ms to frames
                 : Math.ceil(getKickDuration(player) / (1000 / 60));
@@ -306,7 +332,8 @@ export default class GameLoopService {
     isAttackActive(player) {
         if (!player.attackState?.type) return false;
 
-        const attackAge = this.serverTick - player.attackState.startTick;
+        const simulationTick = this.serverTick - SIMULATION_DELAY;
+        const attackAge = simulationTick - player.attackState.startTick;
         const activeStart = player.attackState.type === "punch"
             ? getPunchActiveStart(player)
             : getKickActiveStart(player);

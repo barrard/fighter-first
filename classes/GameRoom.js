@@ -46,6 +46,8 @@ export default class GameRoom {
 
     startGame() {
         this.gameLoopService.start();
+        this.matchStartInfo = this.gameLoopService.getMatchStartInfo();
+        this.io.to(this.roomName).emit("matchStart", this.matchStartInfo);
     }
 
     stopGame() {
