@@ -13,7 +13,7 @@ const app = express();
 const server = http.createServer(app);
 const allowedOrigins = process.env.CLIENT_ORIGINS
     ? process.env.CLIENT_ORIGINS.split(",").map((origin) => origin.trim())
-    : ["http://localhost:5173"];
+    : ["http://localhost:5173", "https://fight.raveaboutdave.com"];
 
 var corsOptions = {
     origin: allowedOrigins,
