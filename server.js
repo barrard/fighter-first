@@ -35,7 +35,7 @@ io.engine.on("headers", (headers, req) => {
     }
 });
 
-const port = process.env.NODE_ENV === "development" ? 3000 : 1548;
+const port = 1548;
 const DEBUG_NET = process.env.DEBUG_NET === "1" || process.env.DEBUG_NET === "true";
 const DEBUG_FIRST_FRAMES = Number(process.env.DEBUG_FIRST_FRAMES ?? 10);
 
@@ -82,6 +82,7 @@ function addInputBatchToPlayer(batchInput, socket) {
     const playerId = socket.id;
     const room = GameRoom.socketIdToRoom[playerId];
     if (!room) return;
+    if (!room.gameLoopService?.roundActive) return;
     const player = room.gameState.players.get(playerId);
     if (!player) return;
     const frames = batchInput?.b ?? batchInput?.keysPressed;
@@ -170,6 +171,7 @@ io.on("connection", (socket) => {
             return;
         }
 
+        const characterStats = character.stats || {};
         const {
             width: characterWidth,
             height: characterHeight,
@@ -187,7 +189,7 @@ io.on("connection", (socket) => {
             punchActiveEnd,
             kickActiveStart,
             kickActiveEnd,
-        } = character.stats || {};
+        } = characterStats;
 
         const player = {
             id: playerId,
@@ -231,9 +233,11 @@ io.on("connection", (socket) => {
         if (isPlayer1) {
             room.player1Character = character;
             room.player1GameState = room.gameState.players.get(playerId);
+            room.player1Stats = characterStats;
         } else if (isPlayer2) {
             room.player2Character = character;
             room.player2GameState = room.gameState.players.get(playerId);
+            room.player2Stats = characterStats;
         }
 
         io.to(room.roomName).emit("characterSelected", {

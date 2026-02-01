@@ -62,9 +62,22 @@ export default class GameLoopService {
         this.loopTimes = [];
         this.perfWindow = 60;
         this.gameLoopInterval = null;
+        this.roundDurationSeconds = 99;
+        this.roundStartTick = 0;
+        this.roundActive = false;
+        this.roundOver = false;
+        this.lastTimerSecond = null;
+        this.onRoundEnd = null;
+        this.onRoundTimer = null;
     }
 
     start() {
+        // Reset tick counters for a fresh round start
+        this.serverTick = 0;
+        this.lastServerTick = 0;
+        this.lastTimeSent = 0;
+        this.dataSent = 0;
+        this.loopTimes = [];
         this.matchStartTime = performance.now();
         this.gameLoopInterval = setInterval(() => {
             this.tick();
@@ -84,6 +97,66 @@ export default class GameLoopService {
         clearInterval(this.gameLoopInterval);
     }
 
+    startRound() {
+        this.roundStartTick = this.serverTick;
+        this.roundActive = true;
+        this.roundOver = false;
+        this.lastTimerSecond = null;
+    }
+
+    getRoundRemainingSeconds() {
+        const elapsedTicks = this.serverTick - this.roundStartTick;
+        const elapsedSeconds = Math.floor(elapsedTicks / TICK_RATE);
+        return Math.max(0, this.roundDurationSeconds - elapsedSeconds);
+    }
+
+    checkRoundTimer() {
+        if (!this.roundActive || this.roundOver) return;
+        const remaining = this.getRoundRemainingSeconds();
+        if (remaining !== this.lastTimerSecond) {
+            this.lastTimerSecond = remaining;
+            if (typeof this.onRoundTimer === "function") {
+                this.onRoundTimer(remaining, this.serverTick);
+            }
+        }
+        if (remaining <= 0) {
+            this.signalRoundEnd("timer");
+        }
+    }
+
+    checkRoundEndByHealth() {
+        if (!this.roundActive || this.roundOver) return;
+        const players = Array.from(this.gameState.players.values());
+        if (players.length < 2) return;
+        const anyDown = players.some((player) => (player.health ?? 0) <= 0);
+        if (anyDown) {
+            this.signalRoundEnd("health");
+        }
+    }
+
+    signalRoundEnd(reason) {
+        if (this.roundOver) return;
+        this.roundOver = true;
+        this.roundActive = false;
+        if (DEBUG_NET) {
+            console.log(
+                `[ROUND END] room=${this.roomName} reason=${reason} serverTick=${this.serverTick} remaining=${this.lastTimerSecond ?? "n/a"}`
+            );
+        }
+        if (typeof this.onRoundEnd === "function") {
+            const players = Array.from(this.gameState.players.values()).map((player) => ({
+                id: player.id,
+                health: player.health ?? 0,
+            }));
+            this.onRoundEnd({
+                reason,
+                serverTick: this.serverTick,
+                remainingSeconds: this.lastTimerSecond ?? this.getRoundRemainingSeconds(),
+                players,
+            });
+        }
+    }
+
     tick() {
         const startTime = performance.now();
         // Derive target tick from wall-clock time so it stays in sync with clients
@@ -101,15 +174,19 @@ export default class GameLoopService {
         while (this.serverTick < targetTick) {
             this.serverTick++;
 
-            this.updatePlayerFacingDirections();
+            if (this.roundActive) {
+                this.updatePlayerFacingDirections();
 
-            this.gameState.players.forEach((player) => {
-                this.handlePlayerInput(player);
-                this.updatePlayerState(player);
-            });
+                this.gameState.players.forEach((player) => {
+                    this.handlePlayerInput(player);
+                    this.updatePlayerState(player);
+                });
 
-            // Process combat after all players have updated
-            this.processCombat();
+                // Process combat after all players have updated
+                this.processCombat();
+                this.checkRoundEndByHealth();
+            }
+            this.checkRoundTimer();
 
             // Broadcast every BROADCAST_INTERVAL ticks
             const tickDiff = this.serverTick - this.lastServerTick;

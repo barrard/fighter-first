@@ -36,19 +36,19 @@ const CHARACTERS = [
     createCharacter(3, "Archer", "#22c55e", { width: 46, height: 102, movementSpeed: 5.5 }),
     createCharacter(4, "Paladin", "#eab308", {
         width: 58, height: 115, movementSpeed: 4.2, punchDuration: 350,
-        health: 110, punchDamage: 11, kickDamage: 16
+        health: 110, punchDamage: 11, kickDamage: 16, jumpVelocity: -13, punchKnockback: 9, kickKnockback: 14
     }),
     createCharacter(5, "Rogue", "#6b7280", {
-        width: 45, height: 98, movementSpeed: 6,
+        width: 45, height: 98, movementSpeed: 6,jumpVelocity: -20,
         punchDamage: 8, kickDamage: 12, punchActiveStart: 2, punchActiveEnd: 6
     }),
-    createCharacter(6, "Berserker", "#ef4444", {
+    createCharacter(6, "Berserker", "#ef4444", {jumpVelocity: -12,
         width: 60, height: 118, movementSpeed: 4.3, kickDuration: 450,
         health: 90, punchDamage: 14, kickDamage: 20, punchKnockback: 12, kickKnockback: 18
     }),
     createCharacter(7, "Druid", "#10b981", { width: 52, height: 108, jumpVelocity: -16 }),
     createCharacter(8, "Monk", "#f59e0b", {
-        width: 48, height: 103, movementSpeed: 5.8,
+        width: 48, height: 103, movementSpeed: 5.8,jumpVelocity: -19,
         punchDamage: 9, kickDamage: 13, punchActiveStart: 2, kickActiveStart: 3
     }),
     createCharacter(9, "Ninja", "#1e293b", {
@@ -57,10 +57,10 @@ const CHARACTERS = [
     }),
     createCharacter(10, "Samurai", "#f43f5e", {
         width: 55, height: 112, movementSpeed: 4.8,
-        punchDamage: 13, kickDamage: 17, punchKnockback: 6, kickKnockback: 10
+        punchDamage: 13, kickDamage: 17, punchKnockback: 6, kickKnockback: 10, jumpVelocity: -14
     }),
-    createCharacter(11, "Witch", "#8b5cf6", { width: 47, height: 104, jumpVelocity: -17 }),
-    createCharacter(12, "Pirate", "#06b6d4", { width: 53, height: 109, movementSpeed: 5.1 }),
+    createCharacter(11, "Witch", "#8b5cf6", { width: 47, height: 104, jumpVelocity: -17, movementSpeed: 5.3 }),
+    createCharacter(12, "Pirate", "#06b6d4", { width: 53, height: 109, movementSpeed: 5.1, jumpVelocity: -15 }),
 ];
 
 export default CHARACTERS;

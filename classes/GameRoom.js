@@ -15,6 +15,8 @@ export default class GameRoom {
         this.player2Id = null;
         this.player1Character = null;
         this.player2Character = null;
+        this.player1Stats = null;
+        this.player2Stats = null;
         this.players = 0;
         this.gameLoopService = new GameLoopService(this.io, this.roomName, this.gameState);
         this.readyPlayers = new Set();
@@ -24,6 +26,22 @@ export default class GameRoom {
         this.latencyProbeSeq = 0;
         this.isCalibrationRunning = false;
         this.gameStarted = false;
+        this.roundNumber = 0;
+        this.player1Wins = 0;
+        this.player2Wins = 0;
+        this.roundResetTimer = null;
+        this.roundDurationSeconds = 99;
+        this.bestOf = 3;
+        this.spawnPadding = 100;
+        this.arenaWidth = 1024;
+        this.gameLoopService.roundDurationSeconds = this.roundDurationSeconds;
+        this.gameLoopService.onRoundEnd = (payload) => this.handleRoundEnd(payload);
+        this.gameLoopService.onRoundTimer = (remainingSeconds) => {
+            this.io.to(this.roomName).emit("roundTimer", {
+                remainingSeconds,
+                round: this.roundNumber,
+            });
+        };
     }
     broadcastRoomState(targetSocket = null) {
         const payload = {
@@ -32,6 +50,7 @@ export default class GameRoom {
                       id: this.player1Id,
                       username: this.socketNames[this.player1Id],
                       character: this.player1Character,
+                      stats: this.player1Stats,
                   }
                 : null,
             player2: this.player2Id
@@ -39,6 +58,7 @@ export default class GameRoom {
                       id: this.player2Id,
                       username: this.socketNames[this.player2Id],
                       character: this.player2Character,
+                      stats: this.player2Stats,
                   }
                 : null,
         };
@@ -60,6 +80,7 @@ export default class GameRoom {
             `[MATCH START] room=${this.roomName} serverTick=${this.matchStartInfo.serverTick} matchStartTick=${this.matchStartInfo.matchStartTick} tickRate=${this.matchStartInfo.tickRate}`
         );
         this.io.to(this.roomName).emit("matchStart", this.matchStartInfo);
+        this.startRound();
     }
 
     stopGame() {
@@ -68,6 +89,10 @@ export default class GameRoom {
         this.readyPlayers.clear();
         this.latencyAckCounts.clear();
         this.latencyAckSeqs.clear();
+        if (this.roundResetTimer) {
+            clearTimeout(this.roundResetTimer);
+            this.roundResetTimer = null;
+        }
         this.stopCalibration();
     }
 
@@ -184,6 +209,12 @@ export default class GameRoom {
 
     markPlayerReady(socketId) {
         if (socketId !== this.player1Id && socketId !== this.player2Id) return false;
+        if (this.gameStarted || this.isCalibrationRunning) {
+            return true;
+        }
+        if (this.readyPlayers.has(socketId)) {
+            return true;
+        }
         this.readyPlayers.add(socketId);
         console.log(
             `[READY] room=${this.roomName} player=${socketId.slice(0, 6)} readyCount=${this.readyPlayers.size}`
@@ -249,5 +280,108 @@ export default class GameRoom {
         if (p1Seqs?.has(3) && p2Seqs?.has(3)) {
             this.startGame();
         }
+    }
+
+    startRound() {
+        this.roundNumber += 1;
+        this.resetPlayersForRound();
+        this.gameLoopService.startRound();
+        console.log(
+            `[ROUND START] room=${this.roomName} round=${this.roundNumber} p1Wins=${this.player1Wins} p2Wins=${this.player2Wins}`
+        );
+        this.io.to(this.roomName).emit("roundStart", {
+            round: this.roundNumber,
+            durationSeconds: this.roundDurationSeconds,
+            scores: {
+                player1Wins: this.player1Wins,
+                player2Wins: this.player2Wins,
+            },
+        });
+    }
+
+    resetPlayersForRound() {
+        for (const player of this.gameState.players.values()) {
+            player.health = player.maxHealth ?? player.health ?? 100;
+            player.hitStun = 0;
+            player.knockbackVelocity = 0;
+            player.attackState = null;
+            player.isPunching = false;
+            player.isKicking = false;
+            player.isJumping = false;
+            player.verticalVelocity = 0;
+            player.horizontalVelocity = 0;
+            player.movingDirection = null;
+            player.inputBuffer = {};
+            player.lastProcessedTick = 0;
+            player.lastInput = null;
+            player.height = 0;
+            player.facing = player.id === this.player1Id ? "right" : "left";
+            const width = player.characterWidth ?? 50;
+            if (player.id === this.player1Id) {
+                player.x = this.spawnPadding;
+            } else if (player.id === this.player2Id) {
+                player.x = Math.max(0, this.arenaWidth - width - this.spawnPadding);
+            }
+        }
+    }
+
+    handleRoundEnd({ reason, players, remainingSeconds }) {
+        console.log(
+            `[ROUND END HANDLER] room=${this.roomName} round=${this.roundNumber} reason=${reason} remaining=${remainingSeconds}`
+        );
+        const playerHealth = new Map(players.map((player) => [player.id, player.health]));
+        const p1Health = playerHealth.get(this.player1Id) ?? 0;
+        const p2Health = playerHealth.get(this.player2Id) ?? 0;
+        let winnerId = null;
+        if (reason === "health") {
+            if (p1Health > p2Health) winnerId = this.player1Id;
+            if (p2Health > p1Health) winnerId = this.player2Id;
+        } else if (reason === "timer") {
+            if (p1Health > p2Health) winnerId = this.player1Id;
+            if (p2Health > p1Health) winnerId = this.player2Id;
+        }
+        const outcome = winnerId ? "win" : "draw";
+
+        if (winnerId === this.player1Id) this.player1Wins += 1;
+        if (winnerId === this.player2Id) this.player2Wins += 1;
+
+        // Stop loop between rounds and require a new ready/calibration sequence
+        this.gameLoopService.stop();
+        this.gameStarted = false;
+        this.readyPlayers.clear();
+        this.latencyAckCounts.clear();
+        this.latencyAckSeqs.clear();
+        this.stopCalibration();
+
+        this.io.to(this.roomName).emit("roundEnd", {
+            round: this.roundNumber,
+            reason,
+            winnerId,
+            outcome,
+            remainingSeconds,
+            players,
+            scores: {
+                player1Wins: this.player1Wins,
+                player2Wins: this.player2Wins,
+            },
+        });
+        console.log(
+            `[ROUND END EMIT] room=${this.roomName} round=${this.roundNumber} winner=${winnerId ?? "draw"}`
+        );
+
+        const winTarget = Math.ceil(this.bestOf / 2);
+        if (this.player1Wins >= winTarget || this.player2Wins >= winTarget) {
+            const matchWinnerId = this.player1Wins >= winTarget ? this.player1Id : this.player2Id;
+            this.io.to(this.roomName).emit("matchEnd", {
+                winnerId: matchWinnerId,
+                scores: {
+                    player1Wins: this.player1Wins,
+                    player2Wins: this.player2Wins,
+                },
+            });
+            return;
+        }
+
+        // Wait for clients to re-ready; round will start after calibration + matchStart
     }
 }
