@@ -24,6 +24,7 @@ const ONE_SECOND = 1000;
 const TICK_RATE = 60;
 const SIMULATION_DELAY = 6;
 const BROADCAST_INTERVAL = 3;
+const DEBUG_NET = process.env.DEBUG_NET === "1" || process.env.DEBUG_NET === "true";
 
 const getCharacterWidth = (player) => player?.characterWidth || PLAYER_WIDTH;
 const getCharacterHeight = (player) => player?.characterHeight || PLAYER_HEIGHT;
@@ -89,6 +90,12 @@ export default class GameLoopService {
         const targetTick = Math.floor((startTime - this.matchStartTime) * TICK_RATE / 1000);
 
         if (targetTick <= this.serverTick) return; // No new ticks to process
+        const backlog = targetTick - this.serverTick;
+        if (DEBUG_NET && backlog > 1 && this.serverTick % 60 === 0) {
+            console.log(
+                `[TICK DEBUG] room=${this.roomName} serverTick=${this.serverTick} targetTick=${targetTick} backlog=${backlog}`
+            );
+        }
 
         // Process all ticks up to target (catches up if setInterval fires late)
         while (this.serverTick < targetTick) {
@@ -151,12 +158,15 @@ export default class GameLoopService {
         const simulationTick = this.serverTick - SIMULATION_DELAY;
         const input = player.inputBuffer[simulationTick];
 
-        // Uncomment for tick debugging:
-        // if (this.serverTick % 60 === 0) {
-        //     const bufferKeys = Object.keys(player.inputBuffer).map(Number).sort((a, b) => a - b);
-        //     const bufferRange = bufferKeys.length > 0 ? `[${bufferKeys[0]}..${bufferKeys[bufferKeys.length - 1]}]` : '[]';
-        //     console.log(`[TICK DEBUG] player=${player.id.substring(0, 6)}, serverTick=${this.serverTick}, simTick=${simulationTick}, found=${!!input}, bufferSize=${bufferKeys.length}, bufferRange=${bufferRange}, lastProcessedTick=${player.lastProcessedTick}`);
-        // }
+        if (DEBUG_NET && this.serverTick % 60 === 0) {
+            const bufferKeys = Object.keys(player.inputBuffer).map(Number).sort((a, b) => a - b);
+            const bufferRange = bufferKeys.length > 0
+                ? `[${bufferKeys[0]}..${bufferKeys[bufferKeys.length - 1]}]`
+                : "[]";
+            console.log(
+                `[TICK DEBUG] player=${player.id.substring(0, 6)} serverTick=${this.serverTick} simTick=${simulationTick} found=${Boolean(input)} bufferSize=${bufferKeys.length} bufferRange=${bufferRange} lastProcessedTick=${player.lastProcessedTick}`
+            );
+        }
 
         let keysPressed;
         if (input) {

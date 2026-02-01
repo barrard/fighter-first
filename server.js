@@ -1,4 +1,5 @@
 // server.js
+import "dotenv/config";
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
@@ -35,6 +36,8 @@ io.engine.on("headers", (headers, req) => {
 });
 
 const port = process.env.NODE_ENV === "development" ? 3000 : 1548;
+const DEBUG_NET = process.env.DEBUG_NET === "1" || process.env.DEBUG_NET === "true";
+const DEBUG_FIRST_FRAMES = Number(process.env.DEBUG_FIRST_FRAMES ?? 10);
 
 app.use(cors(corsOptions));
 app.use(express.json());
@@ -89,10 +92,29 @@ function addInputBatchToPlayer(batchInput, socket) {
         if (!decodedFrame?.serverTick) continue;
         player.inputBuffer[decodedFrame.serverTick] = decodedFrame;
     }
-    // Uncomment for input debugging:
-    // const currentServerTick = room.gameLoopService.serverTick;
-    // const ticks = batchInput.keysPressed.map(f => f.serverTick);
-    // console.log(`[INPUT DEBUG] clientTicks=[${ticks}], serverTick=${currentServerTick}, simTick=${currentServerTick - 6}, bufferSize=${Object.keys(player.inputBuffer).length}`);
+    if (DEBUG_NET) {
+        const now = Date.now();
+        player.lastInputReceivedAt = now;
+        player.lastInputBatchSize = frames.length;
+        const currentServerTick = room.gameLoopService?.serverTick ?? 0;
+        const ticks = frames.map((f) => f?.t ?? f?.serverTick).filter((t) => t != null);
+        const minTick = ticks.length ? Math.min(...ticks) : null;
+        const maxTick = ticks.length ? Math.max(...ticks) : null;
+        if ((player._debugFramesLogged ?? 0) < DEBUG_FIRST_FRAMES) {
+            const remaining = DEBUG_FIRST_FRAMES - (player._debugFramesLogged ?? 0);
+            const sample = ticks.slice(0, remaining);
+            console.log(
+                `[INPUT FIRST] player=${playerId.slice(0, 6)} frames=${sample.length} ticks=[${sample.join(",")}] serverTick=${currentServerTick} simTick=${currentServerTick - 6}`
+            );
+            player._debugFramesLogged = (player._debugFramesLogged ?? 0) + sample.length;
+        }
+        if (!player._lastInputDebugAt || now - player._lastInputDebugAt > 1000) {
+            player._lastInputDebugAt = now;
+            console.log(
+                `[INPUT DEBUG] player=${playerId.slice(0, 6)} batch=${frames.length} tickRange=${minTick}-${maxTick} serverTick=${currentServerTick} bufferSize=${Object.keys(player.inputBuffer).length}`
+            );
+        }
+    }
 }
 
 function checkForUsername(socket) {
@@ -222,11 +244,9 @@ io.on("connection", (socket) => {
         room.broadcastRoomState();
 
         if (room.player1Character && room.player2Character) {
-            room.startGame();
             io.to(room.roomName).emit("initServerPlayers", {
                 players: [room.player1GameState, room.player2GameState],
             });
-
             io.to(room.roomName).emit("playerJoined", player);
         }
     });
@@ -331,6 +351,28 @@ io.on("connection", (socket) => {
         room.broadcastRoomState(socket);
     });
 
+    socket.on("clientReady", () => {
+        const room = GameRoom.socketIdToRoom[socket.id];
+        if (!room) return;
+        console.log(`[CLIENT READY] socket=${socket.id.slice(0, 6)} room=${room.roomName}`);
+        room.markPlayerReady(socket.id);
+    });
+
+    socket.on("latencyPong", (data = {}) => {
+        const room = GameRoom.socketIdToRoom[socket.id];
+        if (!room) return;
+        const seq = Number(data.seq);
+        const serverSentAt = Number(data.serverSentAt);
+        if (!seq || !serverSentAt) return;
+        const rtt = Date.now() - serverSentAt;
+        const latencyMs = Math.max(0, Math.round(rtt / 2));
+        console.log(
+            `[LATENCY PONG] socket=${socket.id.slice(0, 6)} seq=${seq} rtt=${rtt} latencyMs=${latencyMs}`
+        );
+        socket.emit("latencyAck", { seq, latencyMs });
+        room.recordLatencyAckSeq(socket.id, seq);
+    });
+
     socket.on("disconnect", () => {
         const playerId = socket.id;
         console.log("User disconnected", playerId);
@@ -347,4 +389,5 @@ io.on("connection", (socket) => {
 
 server.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
+    console.log(`[DEBUG_NET] ${DEBUG_NET ? "true" : "false"} (DEBUG_FIRST_FRAMES=${DEBUG_FIRST_FRAMES})`);
 });
