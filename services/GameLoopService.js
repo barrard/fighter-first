@@ -253,7 +253,22 @@ export default class GameLoopService {
         } else if (player.lastInput) {
             keysPressed = player.lastInput;
         } else {
-            return;
+            // No exact match and no previous input — find the closest
+            // buffered tick <= simulationTick to bootstrap lastInput.
+            const bufferKeys = Object.keys(player.inputBuffer).map(Number);
+            let bestTick = -1;
+            for (let i = 0; i < bufferKeys.length; i++) {
+                if (bufferKeys[i] <= simulationTick && bufferKeys[i] > bestTick) {
+                    bestTick = bufferKeys[i];
+                }
+            }
+            if (bestTick >= 0) {
+                keysPressed = player.inputBuffer[bestTick];
+                player.lastInput = keysPressed;
+                player.lastProcessedTick = simulationTick;
+            } else {
+                return;
+            }
         }
 
         // Clean up stale buffer entries
