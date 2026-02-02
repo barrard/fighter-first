@@ -269,6 +269,7 @@ io.on("connection", (socket) => {
             socket.emit("roomVerified", inRoomAs);
         } else if (inRoomAs !== "unknown" && inRoom) {
             socket.emit("roomVerified", inRoomAs);
+            room?.broadcastRoomState(socket);
         }
         console.log(`verifyRoom: Socket ${socket.id} is in room ${roomName} as ${inRoomAs}`);
     });

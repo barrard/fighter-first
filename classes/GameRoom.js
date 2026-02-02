@@ -34,6 +34,10 @@ export default class GameRoom {
         this.bestOf = 3;
         this.spawnPadding = 100;
         this.arenaWidth = 1024;
+        this.countdownSeconds = 3;
+        this.countdownHoldMs = 800;
+        this.countdownTimer = null;
+        this.isCountdownRunning = false;
         this.gameLoopService.roundDurationSeconds = this.roundDurationSeconds;
         this.gameLoopService.onRoundEnd = (payload) => this.handleRoundEnd(payload);
         this.gameLoopService.onRoundTimer = (remainingSeconds) => {
@@ -93,6 +97,7 @@ export default class GameRoom {
             clearTimeout(this.roundResetTimer);
             this.roundResetTimer = null;
         }
+        this.stopCountdown();
         this.stopCalibration();
     }
 
@@ -245,6 +250,32 @@ export default class GameRoom {
         }, 500);
     }
 
+    startCountdown() {
+        if (this.isCountdownRunning || this.gameStarted) return;
+        this.isCountdownRunning = true;
+        const payload = {
+            seconds: this.countdownSeconds,
+            holdMs: this.countdownHoldMs,
+            tickMs: 1000,
+            startAt: Date.now(),
+        };
+        this.io.to(this.roomName).emit("startCountdown", payload);
+        const totalMs = this.countdownSeconds * payload.tickMs + this.countdownHoldMs;
+        this.countdownTimer = setTimeout(() => {
+            this.isCountdownRunning = false;
+            this.countdownTimer = null;
+            this.startGame();
+        }, totalMs);
+    }
+
+    stopCountdown() {
+        if (this.countdownTimer) {
+            clearTimeout(this.countdownTimer);
+            this.countdownTimer = null;
+        }
+        this.isCountdownRunning = false;
+    }
+
     stopCalibration() {
         if (this.latencyProbeTimer) {
             clearInterval(this.latencyProbeTimer);
@@ -278,7 +309,7 @@ export default class GameRoom {
         const p1Seqs = this.latencyAckSeqs.get(this.player1Id);
         const p2Seqs = this.latencyAckSeqs.get(this.player2Id);
         if (p1Seqs?.has(3) && p2Seqs?.has(3)) {
-            this.startGame();
+            this.startCountdown();
         }
     }
 
@@ -352,6 +383,7 @@ export default class GameRoom {
         this.latencyAckCounts.clear();
         this.latencyAckSeqs.clear();
         this.stopCalibration();
+        this.stopCountdown();
 
         this.io.to(this.roomName).emit("roundEnd", {
             round: this.roundNumber,
