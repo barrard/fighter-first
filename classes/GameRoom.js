@@ -34,6 +34,9 @@ export default class GameRoom {
         this.bestOf = 3;
         this.spawnPadding = 100;
         this.arenaWidth = 1024;
+        this.roundPrepared = false;
+        this.matchOver = false;
+        this.rematchVotes = new Set();
         this.countdownSeconds = 3;
         this.countdownHoldMs = 800;
         this.countdownTimer = null;
@@ -97,6 +100,9 @@ export default class GameRoom {
             clearTimeout(this.roundResetTimer);
             this.roundResetTimer = null;
         }
+        this.roundPrepared = false;
+        this.matchOver = false;
+        this.rematchVotes.clear();
         this.stopCountdown();
         this.stopCalibration();
     }
@@ -214,6 +220,7 @@ export default class GameRoom {
 
     markPlayerReady(socketId) {
         if (socketId !== this.player1Id && socketId !== this.player2Id) return false;
+        if (this.matchOver) return false;
         if (this.gameStarted || this.isCalibrationRunning) {
             return true;
         }
@@ -253,6 +260,10 @@ export default class GameRoom {
     startCountdown() {
         if (this.isCountdownRunning || this.gameStarted) return;
         this.isCountdownRunning = true;
+        this.resetPlayersForRound();
+        this.roundPrepared = true;
+        const players = Array.from(this.gameState.players.values());
+        this.io.to(this.roomName).emit("initServerPlayers", { players });
         const payload = {
             seconds: this.countdownSeconds,
             holdMs: this.countdownHoldMs,
@@ -315,7 +326,9 @@ export default class GameRoom {
 
     startRound() {
         this.roundNumber += 1;
-        this.resetPlayersForRound();
+        if (!this.roundPrepared) {
+            this.resetPlayersForRound();
+        }
         this.gameLoopService.startRound();
         console.log(
             `[ROUND START] room=${this.roomName} round=${this.roundNumber} p1Wins=${this.player1Wins} p2Wins=${this.player2Wins}`
@@ -328,6 +341,7 @@ export default class GameRoom {
                 player2Wins: this.player2Wins,
             },
         });
+        this.roundPrepared = false;
     }
 
     resetPlayersForRound() {
@@ -354,6 +368,7 @@ export default class GameRoom {
                 player.x = Math.max(0, this.arenaWidth - width - this.spawnPadding);
             }
         }
+        this.roundPrepared = true;
     }
 
     handleRoundEnd({ reason, players, remainingSeconds }) {
@@ -385,6 +400,8 @@ export default class GameRoom {
         this.stopCalibration();
         this.stopCountdown();
 
+        const winTarget = Math.ceil(this.bestOf / 2);
+        const isMatchOver = this.player1Wins >= winTarget || this.player2Wins >= winTarget;
         this.io.to(this.roomName).emit("roundEnd", {
             round: this.roundNumber,
             reason,
@@ -396,14 +413,16 @@ export default class GameRoom {
                 player1Wins: this.player1Wins,
                 player2Wins: this.player2Wins,
             },
+            matchOver: isMatchOver,
         });
         console.log(
             `[ROUND END EMIT] room=${this.roomName} round=${this.roundNumber} winner=${winnerId ?? "draw"}`
         );
 
-        const winTarget = Math.ceil(this.bestOf / 2);
         if (this.player1Wins >= winTarget || this.player2Wins >= winTarget) {
             const matchWinnerId = this.player1Wins >= winTarget ? this.player1Id : this.player2Id;
+            this.matchOver = true;
+            this.rematchVotes.clear();
             this.io.to(this.roomName).emit("matchEnd", {
                 winnerId: matchWinnerId,
                 scores: {
@@ -415,5 +434,36 @@ export default class GameRoom {
         }
 
         // Wait for clients to re-ready; round will start after calibration + matchStart
+    }
+
+    resetMatchForRematch() {
+        this.gameLoopService.stop();
+        this.gameStarted = false;
+        this.roundPrepared = false;
+        this.readyPlayers.clear();
+        this.latencyAckCounts.clear();
+        this.latencyAckSeqs.clear();
+        this.stopCountdown();
+        this.stopCalibration();
+        this.roundNumber = 0;
+        this.player1Wins = 0;
+        this.player2Wins = 0;
+        this.matchOver = false;
+    }
+
+    registerRematchVote(socketId) {
+        if (!this.matchOver) return { started: false, count: this.rematchVotes.size };
+        if (socketId !== this.player1Id && socketId !== this.player2Id) {
+            return { started: false, count: this.rematchVotes.size };
+        }
+        this.rematchVotes.add(socketId);
+        const count = this.rematchVotes.size;
+        if (this.rematchVotes.has(this.player1Id) && this.rematchVotes.has(this.player2Id)) {
+            this.rematchVotes.clear();
+            this.resetMatchForRematch();
+            this.startCalibration();
+            return { started: true, count: 2 };
+        }
+        return { started: false, count };
     }
 }

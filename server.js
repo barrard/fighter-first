@@ -82,7 +82,7 @@ function addInputBatchToPlayer(batchInput, socket) {
     const playerId = socket.id;
     const room = GameRoom.socketIdToRoom[playerId];
     if (!room) return;
-    if (!room.gameLoopService?.roundActive) return;
+    if (!room.gameLoopService) return;
     const player = room.gameState.players.get(playerId);
     if (!player) return;
     const frames = batchInput?.b ?? batchInput?.keysPressed;
@@ -376,6 +376,33 @@ io.on("connection", (socket) => {
         );
         socket.emit("latencyAck", { seq, latencyMs });
         room.recordLatencyAckSeq(socket.id, seq);
+    });
+
+    socket.on("matchRematch", () => {
+        const room = GameRoom.socketIdToRoom[socket.id];
+        if (!room) return;
+        const result = room.registerRematchVote(socket.id);
+        if (result?.started) {
+            io.to(room.roomName).emit("rematchAccepted");
+        }
+    });
+
+    socket.on("matchQuit", async () => {
+        const room = GameRoom.socketIdToRoom[socket.id];
+        if (!room) return;
+        const roomName = room.roomName;
+        room.stopGame();
+        io.to(roomName).emit("matchQuit");
+        const sockets = await io.in(roomName).fetchSockets();
+        for (const s of sockets) {
+            s.leave(roomName);
+            GameRoom.socketIdToRoom[s.id] = null;
+        }
+        delete GameRoom.gameRooms[roomName];
+        socket.broadcast.emit(
+            "roomsList",
+            Object.values(GameRoom.gameRooms).map((gr) => gr.toDto())
+        );
     });
 
     socket.on("disconnect", () => {
