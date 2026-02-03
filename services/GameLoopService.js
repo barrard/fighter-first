@@ -1,49 +1,20 @@
 import { performance } from "perf_hooks";
 import { encodeGameStatePayload } from "../../shared/stateCodec.js";
+import {
+    CANVAS_WIDTH,
+    FLOOR_Y,
+    GRAVITY,
+    SERVER_TICK_RATE,
+} from "../../shared/gameConstants.js";
 
-const PUNCH_DURATION = 300; // milliseconds
-const KICK_DURATION = 400; // milliseconds
-const ARM_WIDTH = 30; // pixels
-const ARM_HEIGHT = 10; // pixels
-const ARM_Y_OFFSET = 30; // 70px from top of 100px character
-const LEG_WIDTH = 35; // pixels
-const LEG_HEIGHT = 8; // pixels
-const LEG_Y_OFFSET = 70; // Position from top of character
-
-const PLAYER_WIDTH = 50;
-const PLAYER_HEIGHT = 100;
-const MOVEMENT_SPEED = 5; // Pixels per frame
-const ARENA_WIDTH = 1024;
-const JUMP_VELOCITY = -15;
-const GRAVITY = 0.8;
-const FLOOR_Y = 536; // CANVAS_HEIGHT(576) - FLOOR_HEIGHT(40)
-const FLOOR_HEIGHT = 40; // or some other value
-const AIR_RESISTANCE = 0.02;
-const GROUND_FRICTION = 0.2;
+// Server-only constants
+const ARENA_WIDTH = CANVAS_WIDTH;
+const TICK_RATE = SERVER_TICK_RATE;
 const ONE_SECOND = 1000;
-const TICK_RATE = 60;
 const SIMULATION_DELAY = 6;
 const BROADCAST_INTERVAL = 3;
-const DEBUG_NET = process.env.DEBUG_NET === "1" || process.env.DEBUG_NET === "true";
-
-const getCharacterWidth = (player) => player?.characterWidth || PLAYER_WIDTH;
-const getCharacterHeight = (player) => player?.characterHeight || PLAYER_HEIGHT;
-const getMovementSpeed = (player) => player?.movementSpeed || MOVEMENT_SPEED;
-const getJumpVelocity = (player) => player?.jumpVelocity || JUMP_VELOCITY;
-const getPunchDuration = (player) => player?.punchDuration || PUNCH_DURATION;
-const getKickDuration = (player) => player?.kickDuration || KICK_DURATION;
-
-// Combat stat getters
-const getPunchDamage = (player) => player?.punchDamage || 10;
-const getKickDamage = (player) => player?.kickDamage || 15;
-const getPunchKnockback = (player) => player?.punchKnockback || 8;
-const getKickKnockback = (player) => player?.kickKnockback || 12;
-const getPunchActiveStart = (player) => player?.punchActiveStart || 3;
-const getPunchActiveEnd = (player) => player?.punchActiveEnd || 8;
-const getKickActiveStart = (player) => player?.kickActiveStart || 5;
-const getKickActiveEnd = (player) => player?.kickActiveEnd || 12;
-
 const HIT_STUN_FRAMES = 10;
+const DEBUG_NET = process.env.DEBUG_NET === "1" || process.env.DEBUG_NET === "true";
 const roundTo = (value, precision = 2) => {
     if (typeof value !== "number" || Number.isNaN(value)) return 0;
     const factor = Math.pow(10, precision);
@@ -202,6 +173,7 @@ export default class GameLoopService {
                     height: roundTo(player.height),
                     facing: player.facing,
                     isJumping: Boolean(player.isJumping),
+                    isCrouching: Boolean(player.isCrouching),
                     isKicking: Boolean(player.isKicking),
                     isPunching: Boolean(player.isPunching),
                     verticalVelocity: roundTo(player.verticalVelocity),
@@ -291,8 +263,12 @@ export default class GameLoopService {
             }
             if (keysPressed.ArrowUp && !player.isJumping) {
                 player.isJumping = true;
-                player.verticalVelocity = getJumpVelocity(player);
+                player.verticalVelocity = player.jumpVelocity;
             }
+            // Handle crouch
+            player.isCrouching = Boolean(keysPressed.ArrowDown);
+        } else {
+            player.isCrouching = false;
         }
 
         // Handle punch input - only start if not already attacking
@@ -319,7 +295,7 @@ export default class GameLoopService {
     updatePlayerState(player) {
         player.serverTick = this.serverTick;
         const simulationTick = this.serverTick - SIMULATION_DELAY;
-        const width = getCharacterWidth(player);
+        const width = player.characterWidth;
 
         // Handle hit stun - prevents movement/actions
         if (player.hitStun > 0) {
@@ -351,7 +327,7 @@ export default class GameLoopService {
 
         const onGround = !player.isJumping;
 
-        const speed = getMovementSpeed(player);
+        const speed = player.movementSpeed;
         if (player.movingDirection === "ArrowLeft") {
             player.horizontalVelocity = -speed;
         } else if (player.movingDirection === "ArrowRight") {
@@ -380,8 +356,8 @@ export default class GameLoopService {
         if (player.attackState) {
             const attackAge = simulationTick - player.attackState.startTick;
             const durationFrames = player.attackState.type === "punch"
-                ? Math.ceil(getPunchDuration(player) / (1000 / 60)) // Convert ms to frames
-                : Math.ceil(getKickDuration(player) / (1000 / 60));
+                ? Math.ceil(player.punchDuration / (1000 / 60)) // Convert ms to frames
+                : Math.ceil(player.kickDuration / (1000 / 60));
 
             if (attackAge >= durationFrames) {
                 player.isPunching = false;
@@ -434,11 +410,11 @@ export default class GameLoopService {
         const simulationTick = this.serverTick - SIMULATION_DELAY;
         const attackAge = simulationTick - player.attackState.startTick;
         const activeStart = player.attackState.type === "punch"
-            ? getPunchActiveStart(player)
-            : getKickActiveStart(player);
+            ? player.punchActiveStart
+            : player.kickActiveStart;
         const activeEnd = player.attackState.type === "punch"
-            ? getPunchActiveEnd(player)
-            : getKickActiveEnd(player);
+            ? player.punchActiveEnd
+            : player.kickActiveEnd;
 
         return attackAge >= activeStart && attackAge <= activeEnd;
     }
@@ -449,8 +425,8 @@ export default class GameLoopService {
 
         if (this.boxesOverlap(attackHitbox, targetHurtbox)) {
             const isPunch = attacker.attackState.type === "punch";
-            const damage = isPunch ? getPunchDamage(attacker) : getKickDamage(attacker);
-            const knockback = isPunch ? getPunchKnockback(attacker) : getKickKnockback(attacker);
+            const damage = isPunch ? attacker.punchDamage : attacker.kickDamage;
+            const knockback = isPunch ? attacker.punchKnockback : attacker.kickKnockback;
 
             return {
                 hit: true,
@@ -464,14 +440,13 @@ export default class GameLoopService {
     }
 
     getAttackHitbox(player) {
-        const width = getCharacterWidth(player);
-        const height = getCharacterHeight(player);
+        const width = player.characterWidth;
         const isPunch = player.attackState.type === "punch";
 
         // Hitbox extends from the player in the facing direction
-        const hitboxWidth = isPunch ? ARM_WIDTH : LEG_WIDTH;
-        const hitboxHeight = isPunch ? ARM_HEIGHT : LEG_HEIGHT;
-        const yOffset = isPunch ? ARM_Y_OFFSET : LEG_Y_OFFSET;
+        const hitboxWidth = isPunch ? player.armWidth : player.legWidth;
+        const hitboxHeight = isPunch ? player.armHeight : player.legHeight;
+        const yOffset = isPunch ? player.armYOffset : player.legYOffset;
 
         return {
             x: player.facing === "right"
@@ -487,8 +462,8 @@ export default class GameLoopService {
         return {
             x: player.x,
             y: player.height, // Height above ground
-            width: getCharacterWidth(player),
-            height: getCharacterHeight(player),
+            width: player.characterWidth,
+            height: player.characterHeight,
         };
     }
 

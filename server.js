@@ -45,9 +45,9 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use("/api/users", userRoutes);
 
-import characters from "./gameConfig/Characters.js";
+import CHARACTERS from "../shared/Characters.js";
 app.get("/api/characters", (req, res) => {
-    res.json(characters);
+    res.json(CHARACTERS);
 });
 
 const socketNames = {};
@@ -171,57 +171,48 @@ io.on("connection", (socket) => {
             return;
         }
 
-        const characterStats = character.stats || {};
-        const {
-            width: characterWidth,
-            height: characterHeight,
-            movementSpeed,
-            jumpVelocity,
-            punchDuration,
-            kickDuration,
-            // Combat stats
-            health,
-            punchDamage,
-            kickDamage,
-            punchKnockback,
-            kickKnockback,
-            punchActiveStart,
-            punchActiveEnd,
-            kickActiveStart,
-            kickActiveEnd,
-        } = characterStats;
+        // Stats are guaranteed complete from shared/Characters.js (BASE_STATS spread)
+        const stats = character.stats;
 
         const player = {
             id: playerId,
             x: 100,
             height: 0,
-            color: character.color || "#" + Math.floor(Math.random() * 16777215).toString(16),
+            color: character.color,
             movingDirection: null,
             horizontalVelocity: 0,
             isJumping: false,
+            isCrouching: false,
             verticalVelocity: 0,
             facing: "right",
             inputBuffer: {},
             serverTick: 0,
             lastProcessedTick: 0,
             currentFrame: 0,
-            characterWidth: characterWidth,
-            characterHeight: characterHeight,
-            movementSpeed,
-            jumpVelocity,
-            punchDuration,
-            kickDuration,
-            // Combat state
-            health: health || 100,
-            maxHealth: health || 100,
-            punchDamage: punchDamage || 10,
-            kickDamage: kickDamage || 15,
-            punchKnockback: punchKnockback || 8,
-            kickKnockback: kickKnockback || 12,
-            punchActiveStart: punchActiveStart || 3,
-            punchActiveEnd: punchActiveEnd || 8,
-            kickActiveStart: kickActiveStart || 5,
-            kickActiveEnd: kickActiveEnd || 12,
+            // Character stats - copied directly, no fallbacks
+            characterWidth: stats.width,
+            characterHeight: stats.height,
+            movementSpeed: stats.movementSpeed,
+            jumpVelocity: stats.jumpVelocity,
+            punchDuration: stats.punchDuration,
+            kickDuration: stats.kickDuration,
+            armWidth: stats.armWidth,
+            armHeight: stats.armHeight,
+            armYOffset: stats.armYOffset,
+            legWidth: stats.legWidth,
+            legHeight: stats.legHeight,
+            legYOffset: stats.legYOffset,
+            health: stats.health,
+            maxHealth: stats.health,
+            punchDamage: stats.punchDamage,
+            kickDamage: stats.kickDamage,
+            punchKnockback: stats.punchKnockback,
+            kickKnockback: stats.kickKnockback,
+            punchActiveStart: stats.punchActiveStart,
+            punchActiveEnd: stats.punchActiveEnd,
+            kickActiveStart: stats.kickActiveStart,
+            kickActiveEnd: stats.kickActiveEnd,
+            // Combat runtime state
             attackState: null,
             hitStun: 0,
             knockbackVelocity: 0,
@@ -233,11 +224,11 @@ io.on("connection", (socket) => {
         if (isPlayer1) {
             room.player1Character = character;
             room.player1GameState = room.gameState.players.get(playerId);
-            room.player1Stats = characterStats;
+            room.player1Stats = character.stats;
         } else if (isPlayer2) {
             room.player2Character = character;
             room.player2GameState = room.gameState.players.get(playerId);
-            room.player2Stats = characterStats;
+            room.player2Stats = character.stats;
         }
 
         io.to(room.roomName).emit("characterSelected", {

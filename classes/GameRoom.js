@@ -361,7 +361,7 @@ export default class GameRoom {
             player.lastInput = null;
             player.height = 0;
             player.facing = player.id === this.player1Id ? "right" : "left";
-            const width = player.characterWidth ?? 50;
+            const width = player.characterWidth;
             if (player.id === this.player1Id) {
                 player.x = this.spawnPadding;
             } else if (player.id === this.player2Id) {
