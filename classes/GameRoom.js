@@ -4,12 +4,13 @@ export default class GameRoom {
     static socketIdToRoom = {};
     static gameRooms = {};
 
-    constructor({ io, socketNames, ownerId, roomName }) {
+    constructor({ io, socketNames, ownerId, roomName, isTrainingRoom = false }) {
         this.io = io;
         this.gameState = { players: new Map() };
         this.socketNames = socketNames;
         this.roomName = roomName;
         this.ownerId = ownerId;
+        this.isTrainingRoom = isTrainingRoom;
         this.spectators = {};
         this.player1Id = null;
         this.player2Id = null;
@@ -136,10 +137,19 @@ export default class GameRoom {
 
         const asPlayerType = this.inRoomAs(socket);
 
-        if (asPlayerType === "player1" || asPlayerType === "player2") {
+        if (asPlayerType === "player1") {
+            if (this.isTrainingRoom) {
+                this.deleteRoom();
+            } else {
+                this.stopGame();
+                this.io.to(this.roomName).emit("error", { message: "Game ended: Opponent left." });
+                this.deleteRoom();
+            }
+            return;
+        } else if (asPlayerType === "player2") {
             this.stopGame();
             this.io.to(this.roomName).emit("error", { message: "Game ended: Opponent left." });
-            delete GameRoom.gameRooms[this.roomName];
+            this.deleteRoom();
             return;
         } else if (asPlayerType === "spectator") {
             delete this.spectators[socket.id];
@@ -171,7 +181,7 @@ export default class GameRoom {
             this.player1Id = socket.id;
             asPlayerType = "player1";
             this.players += 1;
-        } else if (!this.player2Id) {
+        } else if (!this.player2Id && !this.isTrainingRoom) {
             this.player2Id = socket.id;
             asPlayerType = "player2";
             this.players += 1;
@@ -231,7 +241,10 @@ export default class GameRoom {
         console.log(
             `[READY] room=${this.roomName} player=${socketId.slice(0, 6)} readyCount=${this.readyPlayers.size}`
         );
-        if (this.readyPlayers.has(this.player1Id) && this.readyPlayers.has(this.player2Id)) {
+        if (
+            (this.readyPlayers.has(this.player1Id) && this.readyPlayers.has(this.player2Id)) ||
+            (this.isTrainingRoom && this.readyPlayers.has(this.player1Id))
+        ) {
             this.startCalibration();
         }
         return true;
@@ -319,7 +332,10 @@ export default class GameRoom {
         this.recordLatencyAck(socketId);
         const p1Seqs = this.latencyAckSeqs.get(this.player1Id);
         const p2Seqs = this.latencyAckSeqs.get(this.player2Id);
-        if (p1Seqs?.has(3) && p2Seqs?.has(3)) {
+        if (
+            (p1Seqs?.has(3) && p2Seqs?.has(3)) ||
+            (this.isTrainingRoom && p1Seqs?.has(3))
+        ) {
             this.startCountdown();
         }
     }
@@ -379,12 +395,14 @@ export default class GameRoom {
         const p1Health = playerHealth.get(this.player1Id) ?? 0;
         const p2Health = playerHealth.get(this.player2Id) ?? 0;
         let winnerId = null;
-        if (reason === "health") {
-            if (p1Health > p2Health) winnerId = this.player1Id;
-            if (p2Health > p1Health) winnerId = this.player2Id;
-        } else if (reason === "timer") {
-            if (p1Health > p2Health) winnerId = this.player1Id;
-            if (p2Health > p1Health) winnerId = this.player2Id;
+        if (!this.isTrainingRoom) {
+            if (reason === "health") {
+                if (p1Health > p2Health) winnerId = this.player1Id;
+                if (p2Health > p1Health) winnerId = this.player2Id;
+            } else if (reason === "timer") {
+                if (p1Health > p2Health) winnerId = this.player1Id;
+                if (p2Health > p1Health) winnerId = this.player2Id;
+            }
         }
         const outcome = winnerId ? "win" : "draw";
 
@@ -465,5 +483,24 @@ export default class GameRoom {
             return { started: true, count: 2 };
         }
         return { started: false, count };
+    }
+
+    deleteRoom() {
+        console.log(`[DELETE ROOM] room=${this.roomName}`);
+        this.stopGame();
+        this.io.to(this.roomName).emit("roomDeleted", { roomName: this.roomName });
+        for (const playerSocketId of this.gameState.players.keys()) {
+            delete GameRoom.socketIdToRoom[playerSocketId];
+        }
+        this.gameState.players.clear();
+        this.readyPlayers.clear();
+        this.latencyAckCounts.clear();
+        this.latencyAckSeqs.clear();
+        this.rematchVotes.clear();
+        delete GameRoom.gameRooms[this.roomName];
+        this.io.emit(
+            "roomsList",
+            Object.values(GameRoom.gameRooms).map((gr) => gr.toDto())
+        );
     }
 }

@@ -253,26 +253,26 @@ export default class GameLoopService {
         const onGround = !player.isJumping;
 
         if (onGround) {
-            if (keysPressed.ArrowLeft && !keysPressed.ArrowRight) {
-                player.movingDirection = "ArrowLeft";
-            } else if (keysPressed.ArrowRight && !keysPressed.ArrowLeft) {
-                player.movingDirection = "ArrowRight";
+            if (keysPressed.left && !keysPressed.right) {
+                player.movingDirection = "left";
+            } else if (keysPressed.right && !keysPressed.left) {
+                player.movingDirection = "right";
             } else {
                 player.movingDirection = null;
                 player.horizontalVelocity = 0;
             }
-            if (keysPressed.ArrowUp && !player.isJumping) {
+            if (keysPressed.jump && !player.isJumping) {
                 player.isJumping = true;
                 player.verticalVelocity = player.jumpVelocity;
             }
             // Handle crouch
-            player.isCrouching = Boolean(keysPressed.ArrowDown);
+            player.isCrouching = Boolean(keysPressed.crouch);
         } else {
             player.isCrouching = false;
         }
 
         // Handle punch input - only start if not already attacking
-        if (keysPressed.KeyP && !player.isPunching && !player.isKicking && !player.attackState) {
+        if (keysPressed.punch && !player.isPunching && !player.isKicking && !player.attackState) {
             player.isPunching = true;
             player.attackState = {
                 type: "punch",
@@ -282,7 +282,7 @@ export default class GameLoopService {
         }
 
         // Handle kick input - only start if not already attacking
-        if (keysPressed.KeyK && !player.isKicking && !player.isPunching && !player.attackState) {
+        if (keysPressed.kick && !player.isKicking && !player.isPunching && !player.attackState) {
             player.isKicking = true;
             player.attackState = {
                 type: "kick",
@@ -328,9 +328,9 @@ export default class GameLoopService {
         const onGround = !player.isJumping;
 
         const speed = player.movementSpeed;
-        if (player.movingDirection === "ArrowLeft") {
+        if (player.movingDirection === "left") {
             player.horizontalVelocity = -speed;
-        } else if (player.movingDirection === "ArrowRight") {
+        } else if (player.movingDirection === "right") {
             player.horizontalVelocity = speed;
         } else {
             player.horizontalVelocity = 0;

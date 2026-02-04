@@ -14,7 +14,11 @@ const app = express();
 const server = http.createServer(app);
 const allowedOrigins = process.env.CLIENT_ORIGINS
     ? process.env.CLIENT_ORIGINS.split(",").map((origin) => origin.trim())
-    : ["http://localhost:5173", "https://fight.raveaboutdave.com"];
+    : [
+          "http://localhost:5173",
+          "http://localhost:1549",
+          "https://fight.raveaboutdave.com",
+      ];
 
 var corsOptions = {
     origin: allowedOrigins,
@@ -57,8 +61,8 @@ function decodeInputFrame(rawFrame) {
 
     // Old structure already has booleans
     if (
-        typeof rawFrame.ArrowLeft === "boolean" ||
-        typeof rawFrame.ArrowRight === "boolean"
+        typeof rawFrame.left === "boolean" ||
+        typeof rawFrame.right === "boolean"
     ) {
         return rawFrame;
     }
@@ -313,6 +317,28 @@ io.on("connection", (socket) => {
         );
     });
 
+    socket.on("createTrainingRoom", (data = {}) => {
+        const roomName = data.roomName || `training-${socket.id}`;
+        if (GameRoom.gameRooms[roomName]) {
+            socket.emit("error", { message: "Training room already exists" });
+            return;
+        }
+        const newRoom = new GameRoom({
+            io,
+            socketNames,
+            ownerId: socket.id,
+            roomName,
+            isTrainingRoom: true,
+        });
+        GameRoom.gameRooms[roomName] = newRoom;
+        newRoom.addSocketToRoom(socket);
+        socket.emit("roomCreated", roomName);
+        socket.broadcast.emit(
+            "roomsList",
+            Object.values(GameRoom.gameRooms).map((gr) => gr.toDto())
+        );
+    });
+
     socket.on("getRooms", () => {
         socket.emit(
             "roomsList",
@@ -402,11 +428,17 @@ io.on("connection", (socket) => {
         const room = GameRoom.socketIdToRoom[playerId];
         if (room) {
             room.removeSocketFromRoom(socket);
-            room.gameState.players.delete(playerId);
+            if (room.gameState.players.has(playerId)) {
+                room.gameState.players.delete(playerId);
+            }
         }
         delete GameRoom.socketIdToRoom[socket.id];
         delete socketNames[socket.id];
         io.emit("playerLeft", playerId);
+        io.emit(
+            "roomsList",
+            Object.values(GameRoom.gameRooms).map((gr) => gr.toDto())
+        );
     });
 });
 
