@@ -216,6 +216,9 @@ io.on("connection", (socket) => {
             punchActiveEnd: stats.punchActiveEnd,
             kickActiveStart: stats.kickActiveStart,
             kickActiveEnd: stats.kickActiveEnd,
+            // Directional attack stats
+            attacks: stats.attacks ? { ...stats.attacks } : null,
+            currentAttackType: 0,
             // Combat runtime state
             attackState: null,
             hitStun: 0,

@@ -6,6 +6,7 @@ import {
     GRAVITY,
     SERVER_TICK_RATE,
 } from "../../shared/gameConstants.js";
+import { ATTACK_TYPES, isPunch, isKick, getAttackTypeName } from "../../shared/attackTypes.js";
 
 // Server-only constants
 const ARENA_WIDTH = CANVAS_WIDTH;
@@ -156,6 +157,11 @@ export default class GameLoopService {
                 // Process combat after all players have updated
                 this.processCombat();
                 this.checkRoundEndByHealth();
+            } else {
+                // Round is over - still tick attack durations so animations finish
+                this.gameState.players.forEach((player) => {
+                    this.updateAttackExpiry(player);
+                });
             }
             this.checkRoundTimer();
 
@@ -176,6 +182,7 @@ export default class GameLoopService {
                     isCrouching: Boolean(player.isCrouching),
                     isKicking: Boolean(player.isKicking),
                     isPunching: Boolean(player.isPunching),
+                    currentAttackType: player.currentAttackType || ATTACK_TYPES.NONE,
                     verticalVelocity: roundTo(player.verticalVelocity),
                     horizontalVelocity: roundTo(player.horizontalVelocity),
                     serverTick: player.serverTick,
@@ -271,24 +278,21 @@ export default class GameLoopService {
             player.isCrouching = false;
         }
 
-        // Handle punch input - only start if not already attacking
-        if (keysPressed.punch && !player.isPunching && !player.isKicking && !player.attackState) {
-            player.isPunching = true;
-            player.attackState = {
-                type: "punch",
-                startTick: simulationTick,
-                hasHit: false,
-            };
-        }
-
-        // Handle kick input - only start if not already attacking
-        if (keysPressed.kick && !player.isKicking && !player.isPunching && !player.attackState) {
-            player.isKicking = true;
-            player.attackState = {
-                type: "kick",
-                startTick: simulationTick,
-                hasHit: false,
-            };
+        // Handle directional attack input
+        const attackType = keysPressed.attackType || ATTACK_TYPES.NONE;
+        if (attackType !== ATTACK_TYPES.NONE && !player.attackState) {
+            const typeName = getAttackTypeName(attackType);
+            if (typeName && player.attacks && player.attacks[typeName]) {
+                player.currentAttackType = attackType;
+                player.isPunching = isPunch(attackType);
+                player.isKicking = isKick(attackType);
+                player.attackState = {
+                    type: attackType,
+                    typeName: typeName,
+                    startTick: simulationTick,
+                    hasHit: false,
+                };
+            }
         }
     }
 
@@ -353,17 +357,25 @@ export default class GameLoopService {
         }
 
         // Handle attack duration expiry
-        if (player.attackState) {
-            const attackAge = simulationTick - player.attackState.startTick;
-            const durationFrames = player.attackState.type === "punch"
-                ? Math.ceil(player.punchDuration / (1000 / 60)) // Convert ms to frames
-                : Math.ceil(player.kickDuration / (1000 / 60));
+        this.updateAttackExpiry(player);
+    }
 
-            if (attackAge >= durationFrames) {
-                player.isPunching = false;
-                player.isKicking = false;
-                player.attackState = null;
-            }
+    // Separate method so attacks can finish animating after round ends
+    updateAttackExpiry(player) {
+        if (!player.attackState) return;
+
+        const simulationTick = this.serverTick - SIMULATION_DELAY;
+        const attackAge = simulationTick - player.attackState.startTick;
+        const typeName = player.attackState.typeName;
+        const attackStats = player.attacks?.[typeName];
+        const durationMs = attackStats?.duration || (isPunch(player.attackState.type) ? player.punchDuration : player.kickDuration);
+        const durationFrames = Math.ceil(durationMs / (1000 / 60)); // Convert ms to frames
+
+        if (attackAge >= durationFrames) {
+            player.isPunching = false;
+            player.isKicking = false;
+            player.currentAttackType = ATTACK_TYPES.NONE;
+            player.attackState = null;
         }
     }
 
@@ -409,12 +421,21 @@ export default class GameLoopService {
 
         const simulationTick = this.serverTick - SIMULATION_DELAY;
         const attackAge = simulationTick - player.attackState.startTick;
-        const activeStart = player.attackState.type === "punch"
-            ? player.punchActiveStart
-            : player.kickActiveStart;
-        const activeEnd = player.attackState.type === "punch"
-            ? player.punchActiveEnd
-            : player.kickActiveEnd;
+
+        // Use type-specific active frames from attacks object
+        const typeName = player.attackState.typeName;
+        const attackStats = player.attacks?.[typeName];
+
+        let activeStart, activeEnd;
+        if (attackStats) {
+            activeStart = attackStats.activeStart;
+            activeEnd = attackStats.activeEnd;
+        } else {
+            // Fallback to legacy punch/kick active frames
+            const isPunchAttack = isPunch(player.attackState.type);
+            activeStart = isPunchAttack ? player.punchActiveStart : player.kickActiveStart;
+            activeEnd = isPunchAttack ? player.punchActiveEnd : player.kickActiveEnd;
+        }
 
         return attackAge >= activeStart && attackAge <= activeEnd;
     }
@@ -424,13 +445,24 @@ export default class GameLoopService {
         const targetHurtbox = this.getPlayerHurtbox(target);
 
         if (this.boxesOverlap(attackHitbox, targetHurtbox)) {
-            const isPunch = attacker.attackState.type === "punch";
-            const damage = isPunch ? attacker.punchDamage : attacker.kickDamage;
-            const knockback = isPunch ? attacker.punchKnockback : attacker.kickKnockback;
+            const typeName = attacker.attackState.typeName;
+            const attackStats = attacker.attacks?.[typeName];
+
+            let damage, knockback;
+            if (attackStats) {
+                damage = attackStats.damage;
+                knockback = attackStats.knockback;
+            } else {
+                // Fallback to legacy punch/kick damage
+                const isPunchAttack = isPunch(attacker.attackState.type);
+                damage = isPunchAttack ? attacker.punchDamage : attacker.kickDamage;
+                knockback = isPunchAttack ? attacker.punchKnockback : attacker.kickKnockback;
+            }
 
             return {
                 hit: true,
                 type: attacker.attackState.type,
+                typeName: typeName,
                 damage,
                 knockback: knockback * (attacker.facing === "right" ? 1 : -1),
             };
@@ -441,12 +473,21 @@ export default class GameLoopService {
 
     getAttackHitbox(player) {
         const width = player.characterWidth;
-        const isPunch = player.attackState.type === "punch";
+        const typeName = player.attackState.typeName;
+        const attackStats = player.attacks?.[typeName];
 
-        // Hitbox extends from the player in the facing direction
-        const hitboxWidth = isPunch ? player.armWidth : player.legWidth;
-        const hitboxHeight = isPunch ? player.armHeight : player.legHeight;
-        const yOffset = isPunch ? player.armYOffset : player.legYOffset;
+        let hitboxWidth, hitboxHeight, yOffset;
+        if (attackStats) {
+            hitboxWidth = attackStats.width;
+            hitboxHeight = attackStats.height;
+            yOffset = attackStats.yOffset;
+        } else {
+            // Fallback to legacy punch/kick hitbox
+            const isPunchAttack = isPunch(player.attackState.type);
+            hitboxWidth = isPunchAttack ? player.armWidth : player.legWidth;
+            hitboxHeight = isPunchAttack ? player.armHeight : player.legHeight;
+            yOffset = isPunchAttack ? player.armYOffset : player.legYOffset;
+        }
 
         return {
             x: player.facing === "right"
@@ -491,8 +532,9 @@ export default class GameLoopService {
         // Apply knockback
         target.knockbackVelocity = knockback;
 
+        const attackName = hit.typeName || type;
         console.log(
-            `[Combat] ${attacker.id} hit ${target.id} with ${type} for ${damage} damage. Target health: ${target.health}`
+            `[Combat] ${attacker.id} hit ${target.id} with ${attackName} for ${damage} damage. Target health: ${target.health}`
         );
     }
 

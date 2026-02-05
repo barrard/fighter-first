@@ -368,6 +368,7 @@ export default class GameRoom {
             player.attackState = null;
             player.isPunching = false;
             player.isKicking = false;
+            player.currentAttackType = 0;
             player.isJumping = false;
             player.verticalVelocity = 0;
             player.horizontalVelocity = 0;
