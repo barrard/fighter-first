@@ -352,6 +352,7 @@ export default class GameRoom {
         this.io.to(this.roomName).emit("roundStart", {
             round: this.roundNumber,
             durationSeconds: this.roundDurationSeconds,
+            serverTick: this.gameLoopService.serverTick,
             scores: {
                 player1Wins: this.player1Wins,
                 player2Wins: this.player2Wins,
@@ -456,7 +457,7 @@ export default class GameRoom {
     }
 
     resetMatchForRematch() {
-        this.gameLoopService.stop();
+        this.gameLoopService.resetForNewMatch();
         this.gameStarted = false;
         this.roundPrepared = false;
         this.readyPlayers.clear();

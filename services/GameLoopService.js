@@ -44,16 +44,44 @@ export default class GameLoopService {
     }
 
     start() {
-        // Reset tick counters for a fresh round start
-        this.serverTick = 0;
-        this.lastServerTick = 0;
+        // Perf counters are safe to reset between rounds
         this.lastTimeSent = 0;
         this.dataSent = 0;
         this.loopTimes = [];
-        this.matchStartTime = performance.now();
+
+        if (!this.matchStartTime) {
+            // True first start — initialize from scratch
+            this.serverTick = 0;
+            this.lastServerTick = 0;
+            this.matchStartTime = performance.now();
+        } else {
+            // Resuming after a round end — keep serverTick monotonic.
+            // Recalibrate matchStartTime so the wall-clock formula produces a
+            // targetTick consistent with where serverTick currently is.
+            this.matchStartTime = performance.now() - (this.serverTick * 1000 / TICK_RATE);
+            this.lastServerTick = this.serverTick;
+        }
+
+        clearInterval(this.gameLoopInterval); // safety — avoid double intervals
         this.gameLoopInterval = setInterval(() => {
             this.tick();
-        }, 1000 / TICK_RATE); // 60 fps
+        }, 1000 / TICK_RATE);
+    }
+
+    // Full reset used only for rematch (new match from scratch)
+    resetForNewMatch() {
+        clearInterval(this.gameLoopInterval);
+        this.gameLoopInterval = null;
+        this.serverTick = 0;
+        this.lastServerTick = 0;
+        this.matchStartTime = null; // Signals next start() is a true fresh start
+        this.lastTimeSent = 0;
+        this.dataSent = 0;
+        this.loopTimes = [];
+        this.roundActive = false;
+        this.roundOver = false;
+        this.roundStartTick = 0;
+        this.lastTimerSecond = null;
     }
 
     getMatchStartInfo() {
@@ -142,7 +170,18 @@ export default class GameLoopService {
             );
         }
 
-        // Process all ticks up to target (catches up if setInterval fires late)
+        // Tick budget: if the server fell behind, skip excess ticks rather than
+        // processing a burst. This prevents load spikes from compounding.
+        const MAX_CATCHUP_TICKS = 4;
+        if (backlog > MAX_CATCHUP_TICKS) {
+            const toDrop = backlog - MAX_CATCHUP_TICKS;
+            console.warn(
+                `[TICK BUDGET] room=${this.roomName} dropping ${toDrop} ticks (backlog=${backlog}) serverTick=${this.serverTick}`
+            );
+            this.serverTick += toDrop;
+        }
+
+        // Process ticks up to target (at most MAX_CATCHUP_TICKS per interval)
         while (this.serverTick < targetTick) {
             this.serverTick++;
 
