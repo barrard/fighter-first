@@ -6,7 +6,9 @@ import {
     GRAVITY,
     SERVER_TICK_RATE,
 } from "../../shared/gameConstants.js";
-import { ATTACK_TYPES, isPunch, isKick, getAttackTypeName } from "../../shared/attackTypes.js";
+import { ATTACK_TYPES, isPunch, isKick, isRanged, getAttackTypeName } from "../../shared/attackTypes.js";
+import { createComboState, updateForwardComboState, consumeRangedCombo } from "../../shared/comboSystem.js";
+import { getProjectileState } from "../../shared/projectileSim.js";
 
 // Server-only constants
 const ARENA_WIDTH = CANVAS_WIDTH;
@@ -227,6 +229,9 @@ export default class GameLoopService {
                     serverTick: player.serverTick,
                     health: player.health,
                     hitStun: player.hitStun || 0,
+                    attackStartTick: player.attackStartTick,
+                    projectileSpawnX: player.projectileSpawnX == null ? null : roundTo(player.projectileSpawnX),
+                    projectileSpawnHeight: player.projectileSpawnHeight == null ? null : roundTo(player.projectileSpawnHeight),
                 }));
                 const payload = encodeGameStatePayload({ simulationTick, players });
                 this.io.to(this.roomName).emit("gs", payload);
@@ -317,22 +322,62 @@ export default class GameLoopService {
             player.isCrouching = false;
         }
 
+        if (!player.comboState) {
+            player.comboState = createComboState();
+        }
+        updateForwardComboState(
+            player.comboState,
+            keysPressed,
+            player.previousInput,
+            player.facing,
+            simulationTick
+        );
+
         // Handle directional attack input
-        const attackType = keysPressed.attackType || ATTACK_TYPES.NONE;
+        let attackType = keysPressed.attackType || ATTACK_TYPES.NONE;
+        if (
+            isKick(attackType) &&
+            player.rangedAttack &&
+            consumeRangedCombo(player.comboState, simulationTick)
+        ) {
+            attackType = ATTACK_TYPES.RANGED;
+        }
         if (attackType !== ATTACK_TYPES.NONE && !player.attackState) {
             const typeName = getAttackTypeName(attackType);
-            if (typeName && player.attacks && player.attacks[typeName]) {
+            const attackStats = attackType === ATTACK_TYPES.RANGED
+                ? player.rangedAttack
+                : player.attacks?.[typeName];
+            if (typeName && attackStats) {
                 player.currentAttackType = attackType;
                 player.isPunching = isPunch(attackType);
                 player.isKicking = isKick(attackType);
+                player.isRangedAttacking = isRanged(attackType);
                 player.attackState = {
                     type: attackType,
                     typeName: typeName,
                     startTick: simulationTick,
                     hasHit: false,
                 };
+                player.attackStartTick = simulationTick;
+                if (attackType === ATTACK_TYPES.RANGED) {
+                    player.projectileSpawnX = player.facing === "right"
+                        ? player.x + (player.rangedAttack?.xOffset || player.characterWidth)
+                        : player.x - (player.rangedAttack?.xOffset || player.characterWidth);
+                    player.projectileSpawnHeight = player.height;
+                } else {
+                    player.projectileSpawnX = null;
+                    player.projectileSpawnHeight = null;
+                }
             }
         }
+
+        player.previousInput = {
+            left: Boolean(keysPressed.left),
+            right: Boolean(keysPressed.right),
+            jump: Boolean(keysPressed.jump),
+            crouch: Boolean(keysPressed.crouch),
+            attackType: keysPressed.attackType || ATTACK_TYPES.NONE,
+        };
     }
 
     updatePlayerState(player) {
@@ -406,15 +451,21 @@ export default class GameLoopService {
         const simulationTick = this.serverTick - SIMULATION_DELAY;
         const attackAge = simulationTick - player.attackState.startTick;
         const typeName = player.attackState.typeName;
-        const attackStats = player.attacks?.[typeName];
+        const attackStats = player.attackState.type === ATTACK_TYPES.RANGED
+            ? player.rangedAttack
+            : player.attacks?.[typeName];
         const durationMs = attackStats?.duration || (isPunch(player.attackState.type) ? player.punchDuration : player.kickDuration);
         const durationFrames = Math.ceil(durationMs / (1000 / 60)); // Convert ms to frames
 
         if (attackAge >= durationFrames) {
             player.isPunching = false;
             player.isKicking = false;
+            player.isRangedAttacking = false;
             player.currentAttackType = ATTACK_TYPES.NONE;
             player.attackState = null;
+            player.attackStartTick = null;
+            player.projectileSpawnX = null;
+            player.projectileSpawnHeight = null;
         }
     }
 
@@ -463,7 +514,9 @@ export default class GameLoopService {
 
         // Use type-specific active frames from attacks object
         const typeName = player.attackState.typeName;
-        const attackStats = player.attacks?.[typeName];
+        const attackStats = player.attackState.type === ATTACK_TYPES.RANGED
+            ? player.rangedAttack
+            : player.attacks?.[typeName];
 
         let activeStart, activeEnd;
         if (attackStats) {
@@ -481,11 +534,14 @@ export default class GameLoopService {
 
     checkAttackCollision(attacker, target) {
         const attackHitbox = this.getAttackHitbox(attacker);
+        if (!attackHitbox) return { hit: false };
         const targetHurtbox = this.getPlayerHurtbox(target);
 
         if (this.boxesOverlap(attackHitbox, targetHurtbox)) {
             const typeName = attacker.attackState.typeName;
-            const attackStats = attacker.attacks?.[typeName];
+            const attackStats = attacker.attackState.type === ATTACK_TYPES.RANGED
+                ? attacker.rangedAttack
+                : attacker.attacks?.[typeName];
 
             let damage, knockback;
             if (attackStats) {
@@ -513,25 +569,48 @@ export default class GameLoopService {
     getAttackHitbox(player) {
         const width = player.characterWidth;
         const typeName = player.attackState.typeName;
-        const attackStats = player.attacks?.[typeName];
+        const attackStats = player.attackState.type === ATTACK_TYPES.RANGED
+            ? player.rangedAttack
+            : player.attacks?.[typeName];
 
-        let hitboxWidth, hitboxHeight, yOffset;
+        let hitboxWidth, hitboxHeight, yOffset, xOffset;
         if (attackStats) {
             hitboxWidth = attackStats.width;
             hitboxHeight = attackStats.height;
             yOffset = attackStats.yOffset;
+            xOffset = attackStats.xOffset || width;
         } else {
             // Fallback to legacy punch/kick hitbox
             const isPunchAttack = isPunch(player.attackState.type);
             hitboxWidth = isPunchAttack ? player.armWidth : player.legWidth;
             hitboxHeight = isPunchAttack ? player.armHeight : player.legHeight;
             yOffset = isPunchAttack ? player.armYOffset : player.legYOffset;
+            xOffset = width;
+        }
+
+        if (player.attackState.type === ATTACK_TYPES.RANGED) {
+            const projectileState = getProjectileState({
+                currentTick: this.serverTick - SIMULATION_DELAY,
+                attackStartTick: player.attackStartTick,
+                facing: player.facing,
+                rangedAttack: player.rangedAttack,
+                spawnX: player.projectileSpawnX,
+                spawnHeight: player.projectileSpawnHeight,
+            });
+            if (!projectileState.active) return null;
+
+            return {
+                x: projectileState.x,
+                y: projectileState.relativeHeight,
+                width: hitboxWidth,
+                height: hitboxHeight,
+            };
         }
 
         return {
             x: player.facing === "right"
-                ? player.x + width
-                : player.x - hitboxWidth,
+                ? player.x + xOffset
+                : player.x - xOffset,
             y: player.height + yOffset, // height above ground + offset from top
             width: hitboxWidth,
             height: hitboxHeight,

@@ -10,6 +10,7 @@ import userRoutes from "./routes/users.js";
 import { performance } from "perf_hooks";
 import GameRoom from "./classes/GameRoom.js";
 import { decodeInputMask } from "../shared/inputFlags.js";
+import { createComboState } from "../shared/comboSystem.js";
 const app = express();
 const server = http.createServer(app);
 const allowedOrigins = process.env.CLIENT_ORIGINS
@@ -218,11 +219,19 @@ io.on("connection", (socket) => {
             kickActiveEnd: stats.kickActiveEnd,
             // Directional attack stats
             attacks: stats.attacks ? { ...stats.attacks } : null,
+            rangedAttack: stats.rangedAttack ? { ...stats.rangedAttack } : null,
+            visual: stats.visual ? { ...stats.visual } : null,
             currentAttackType: 0,
             // Combat runtime state
             attackState: null,
             hitStun: 0,
             knockbackVelocity: 0,
+            isRangedAttacking: false,
+            comboState: createComboState(),
+            previousInput: null,
+            attackStartTick: null,
+            projectileSpawnX: null,
+            projectileSpawnHeight: null,
         };
 
         room.gameState.players.set(playerId, player);

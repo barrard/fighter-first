@@ -1,4 +1,5 @@
 import GameLoopService from "../services/GameLoopService.js";
+import { createComboState } from "../../shared/comboSystem.js";
 
 export default class GameRoom {
     static socketIdToRoom = {};
@@ -369,7 +370,11 @@ export default class GameRoom {
             player.attackState = null;
             player.isPunching = false;
             player.isKicking = false;
+            player.isRangedAttacking = false;
             player.currentAttackType = 0;
+            player.attackStartTick = null;
+            player.projectileSpawnX = null;
+            player.projectileSpawnHeight = null;
             player.isJumping = false;
             player.verticalVelocity = 0;
             player.horizontalVelocity = 0;
@@ -377,6 +382,8 @@ export default class GameRoom {
             player.inputBuffer = {};
             player.lastProcessedTick = 0;
             player.lastInput = null;
+            player.previousInput = null;
+            player.comboState = createComboState();
             player.height = 0;
             player.facing = player.id === this.player1Id ? "right" : "left";
             const width = player.characterWidth;
