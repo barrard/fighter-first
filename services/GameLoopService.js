@@ -1,17 +1,16 @@
 import { performance } from "perf_hooks";
 import { encodeGameStatePayload } from "../../shared/stateCodec.js";
 import {
-    CANVAS_WIDTH,
     FLOOR_Y,
     GRAVITY,
     SERVER_TICK_RATE,
 } from "../../shared/gameConstants.js";
+import { getArena, DEFAULT_ARENA_ID } from "../../shared/arenas.js";
 import { ATTACK_TYPES, isPunch, isKick, isRanged, getAttackTypeName } from "../../shared/attackTypes.js";
 import { createComboState, updateForwardComboState, consumeRangedCombo } from "../../shared/comboSystem.js";
 import { getProjectileState } from "../../shared/projectileSim.js";
 
 // Server-only constants
-const ARENA_WIDTH = CANVAS_WIDTH;
 const TICK_RATE = SERVER_TICK_RATE;
 const ONE_SECOND = 1000;
 const SIMULATION_DELAY = 6;
@@ -43,6 +42,7 @@ export default class GameLoopService {
         this.lastTimerSecond = null;
         this.onRoundEnd = null;
         this.onRoundTimer = null;
+        this.arenaWidth = getArena(DEFAULT_ARENA_ID).worldWidth;
     }
 
     start() {
@@ -395,7 +395,7 @@ export default class GameLoopService {
                 player.knockbackVelocity *= 0.8; // Decay knockback
 
                 // Clamp to arena bounds
-                player.x = Math.max(0, Math.min(ARENA_WIDTH - width, player.x));
+                player.x = Math.max(0, Math.min(this.arenaWidth - width, player.x));
             }
 
             // Still apply gravity during hit stun
@@ -426,7 +426,7 @@ export default class GameLoopService {
 
         if (player.horizontalVelocity !== 0) {
             player.x += player.horizontalVelocity;
-            player.x = Math.max(0, Math.min(ARENA_WIDTH - width, player.x));
+            player.x = Math.max(0, Math.min(this.arenaWidth - width, player.x));
         }
 
         if (player.isJumping) {

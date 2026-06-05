@@ -1,5 +1,6 @@
 import GameLoopService from "../services/GameLoopService.js";
 import { createComboState } from "../../shared/comboSystem.js";
+import { getArena, DEFAULT_ARENA_ID } from "../../shared/arenas.js";
 
 export default class GameRoom {
     static socketIdToRoom = {};
@@ -35,7 +36,8 @@ export default class GameRoom {
         this.roundDurationSeconds = 99;
         this.bestOf = 3;
         this.spawnPadding = 100;
-        this.arenaWidth = 1024;
+        this.arenaId = DEFAULT_ARENA_ID;
+        this.arenaWidth = getArena(this.arenaId).worldWidth;
         this.roundPrepared = false;
         this.matchOver = false;
         this.rematchVotes = new Set();
@@ -88,7 +90,7 @@ export default class GameRoom {
         console.log(
             `[MATCH START] room=${this.roomName} serverTick=${this.matchStartInfo.serverTick} matchStartTick=${this.matchStartInfo.matchStartTick} tickRate=${this.matchStartInfo.tickRate}`
         );
-        this.io.to(this.roomName).emit("matchStart", this.matchStartInfo);
+        this.io.to(this.roomName).emit("matchStart", { ...this.matchStartInfo, arenaId: this.arenaId });
         this.startRound();
     }
 
