@@ -222,6 +222,7 @@ io.on("connection", (socket) => {
             rangedAttack: stats.rangedAttack ? { ...stats.rangedAttack } : null,
             visual: stats.visual ? { ...stats.visual } : null,
             currentAttackType: 0,
+            spriteCharacter: character.spriteCharacter || null,
             // Combat runtime state
             attackState: null,
             hitStun: 0,
